@@ -160,7 +160,7 @@ label.chk{font-size:13px;color:var(--mute);display:flex;gap:6px;align-items:cent
     <span class="lbl" style="margin-right:4px">設定</span>
     <label class="chk"><input type="checkbox" id="shadowToggle" checked> 影</label>
     <label class="chk"><input type="checkbox" id="soundToggle" checked> 音</label>
-    <label class="chk">画質 <select id="qualSel"><option value="auto">自動</option><option value="high">高</option><option value="mid">中</option><option value="low">低</option></select></label>
+    <label class="chk">画質 <select id="qualSel"><option value="auto">自動</option><option value="high">高</option><option value="mid">中</option><option value="low">低</option><option value="mobile">スマホ (軽量)</option></select></label>
   </div>
   <details><summary>操作方法</summary>
     <div class="keys" style="margin:8px 0 0">
@@ -247,16 +247,55 @@ async function gunzip(u8) {
   if (u8[0] !== 0x1f || u8[1] !== 0x8b) return u8;
   return new Uint8Array(await new Response(new Blob([u8]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
 }
+/* スマホ・タブレット用の軽いモード (MOB)。iPhone の Safari は、タブのメモリ (GPU に送ったものを含めて 1〜1.5GB ほど) を超えるとページを落とす
+   (「問題が繰り返し起きました」)。PC のままだと、外壁の写真 64枚と外壁の模様のページ 63枚がどれも 2048 四方で、テクスチャだけで 3GB を超える。
+   iOS・Android・指で触る画面 (pointer: coarse) で小さい画面・メモリの少ない端末なら自動で入る。?mobile=1 / ?mobile=0、またはメニューの画質「スマホ (軽量)」(localStorage mcr_mob) で切り替え。
+   入ると: テクスチャを縮めてから GPU に送る (外壁の写真・外壁の模様 1/4、航空写真 1/2、そのほかの画像 256・大きい canvas 512 まで)、写真は1枚ずつ読む、
+   外壁の立体感 (facade3d) と草なし、森の木を半分、一般車の車種・台数、人の数を減らす、影 512、アンチエイリアスなし、画素比 1 まで、後処理なし、GPU に送った外壁の canvas を手放す */
+const MOB = (() => { try { const q = new URLSearchParams(location.search).get('mobile'); if (q === '1' || q === '0') return q === '1'; const s = localStorage.getItem('mcr_mob'); if (s === '1' || s === '0') return s === '1'; } catch (e) {}
+  const ua = navigator.userAgent || '', coarse = !!(window.matchMedia && matchMedia('(pointer: coarse)').matches);
+  const iOS = /iP(hone|ad|od)/.test(ua) || (/Macintosh/.test(ua) && (navigator.maxTouchPoints || 0) > 1);   /* iPad の Safari は Mac のふりをする */
+  return iOS || /Android|Mobile/.test(ua) || (coarse && Math.min(screen.width, screen.height) < 900) || (navigator.deviceMemory > 0 && navigator.deviceMemory <= 2); })();
+const MOB_K = { photo: 0.25, page: 0.25, aer: 0.5, img: 256, canvas: 512, shadow: 512, cars: 22, peds: 30, bikes: 30, ppl: 0.35 };
+try { const q = new URLSearchParams(location.search).get('mobk'); if (q) for (const kv of q.split(',')) { const [k, v] = kv.split(':'); if (k in MOB_K) MOB_K[k] = +v; } } catch (e) {}   /* 試す用: ?mobk=img:256,canvas:512 */
+window.__mobile = { on: MOB, k: MOB_K };
+/* 画像を縮める (半分ずつ縮めて、ちらつき・ぎざぎざを抑える)。own = 元の canvas を捨ててよい (幅 0 にして中身を手放す) */
+function mobShrink(im, s, own) {
+  const w = im.width, h = im.height, W = Math.max(1, Math.round(w * s)), H = Math.max(1, Math.round(h * s)); if (W >= w && H >= h) return im;
+  let cur = im, cw = w, ch = h;
+  while (cw > W || ch > H) { const nw = Math.max(W, Math.ceil(cw / 2)), nh = Math.max(H, Math.ceil(ch / 2)), c = document.createElement('canvas'); c.width = nw; c.height = nh; const g = c.getContext('2d'); g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high'; g.drawImage(cur, 0, 0, nw, nh);
+    if (cur !== im) cur.width = cur.height = 0; cur = c; cw = nw; ch = nh; }
+  if (own) { if (im.close) im.close(); else if (im.getContext) im.width = im.height = 0; }
+  return cur;
+}
+/* スマホ: 読み込みの最後 (最初に描く前) に、残りの大きいテクスチャ (車・人の glTF の画像は MOB_K.img、大きい canvas は MOB_K.canvas まで) を縮める */
+function mobFinish() {
+  if (!MOB) return; const seen = new Set(); let nT = 0;
+  const fix = t => { if (!t || seen.has(t) || t.userData.mob || t.isDataTexture || t.isDataArrayTexture || t.isData3DTexture || t.isCompressedTexture || t.isVideoTexture || t.isDepthTexture || t.isRenderTargetTexture) return; seen.add(t);
+    const im = t.image; if (!im || !im.width || !im.height) return; const s = (im.getContext ? MOB_K.canvas : MOB_K.img) / Math.max(im.width, im.height); if (s >= 1) return;
+    t.image = mobShrink(im, s, false); t.needsUpdate = true; nT++; };
+  scene.traverse(o => { const ms = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
+    for (const m of ms) { for (const k in m) { const v = m[k]; if (v && v.isTexture) fix(v); } if (m.uniforms) for (const k in m.uniforms) { const v = m.uniforms[k] && m.uniforms[k].value; if (v && v.isTexture) fix(v); } } });
+  window.__mobile.shrunk = nT;   /* 形の配列は手放さない (当たり判定の raycast が法線・UV も読む。hit.js は merge した形の配列を切り出す) */
+}
+/* スマホ: 自分で縮めたテクスチャ (外壁の写真・外壁の模様) は、GPU に送ったら手元の canvas を手放す (幅と高さだけ残す) */
+function mobOwn(t) { t.userData.mob = true; if (!MOB) return t; t.onUpdate = () => { const im = t.image; if (im && im.getContext) { t.image = { width: im.width, height: im.height }; im.width = im.height = 0; } }; return t; }
+let _mobQ = Promise.resolve();   /* スマホ: 写真を1枚ずつ読む (2048 四方を何十枚も同時に広げるとそれだけで 1GB 近くになる) */
 async function loadTex(url, expect) {
+  if (MOB && !/^aer/.test(url)) { const p = _mobQ.then(() => loadTex1(url, expect)); _mobQ = p.catch(() => {}); return p; }
+  return loadTex1(url, expect);
+}
+async function loadTex1(url, expect) {
   const bytes = await fetchBytes(url, expect);
-  const bmp = await createImageBitmap(new Blob([bytes], { type: 'image/jpeg' }), { imageOrientation: 'none' });
+  let bmp = await createImageBitmap(new Blob([bytes], { type: 'image/jpeg' }), { imageOrientation: 'none' });
+  if (MOB) bmp = mobShrink(bmp, /^aer/.test(url) ? MOB_K.aer : MOB_K.photo, true);
   const t = new THREE.Texture(bmp); t.needsUpdate = true; t.flipY = false; t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = renderer.capabilities.getMaxAnisotropy(); return t;
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy(); if (MOB) { t.userData.mob = true; if (!/^aer/.test(url)) mobOwn(t); } return t;   /* 航空写真は読み込み中に地面の色を読むので手放さない */
 }
 
 // ---------------- renderer ----------------
 const canvas = $('view');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance', logarithmicDepthBuffer: true });
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: !MOB, powerPreference: 'high-performance', logarithmicDepthBuffer: true });
 /* 画質 QUAL: 'high' = 後処理 (bloom・camfx) + 環境光の遮蔽 (AO) + 露出の自動調整・影 4096、'mid' = 後処理・影 4096、'low' = 後処理なし・影 2048・解像度を下げる。HQ = 後処理を使うか */
 /* 'auto' (既定) = 「低」から始めて、フレームレートを見て上げる・下げる (qualAuto)。
    解像度: ピクセル比の上限に加えて、描く画素の数にも上限 (QUAL_PIX) を付ける (大きい窓 × Retina で後処理が重くなりすぎる) */
@@ -291,7 +330,7 @@ const su = sky.material.uniforms; su.turbidity.value = 4.5; su.rayleigh.value = 
 su.skyK = { value: 1 }; sky.material.fragmentShader = 'uniform float skyK;\n' + sky.material.fragmentShader.replace('vec4( retColor, 1.0 )', 'vec4( retColor * skyK, 1.0 )');
 const sunDir = new THREE.Vector3();
 const hemi = new THREE.HemisphereLight(0xd6e6ff, 0x6b6250, 0.6); scene.add(hemi);
-const sun = new THREE.DirectionalLight(0xfff0dd, 3.2); sun.castShadow = true; { const ms = { high: 4096, mid: 2048, low: 1024 }[QUAL]; sun.shadow.mapSize.set(ms, ms); }   /* 画質 (applyQuality と同じ) */
+const sun = new THREE.DirectionalLight(0xfff0dd, 3.2); sun.castShadow = true; { const ms = MOB ? MOB_K.shadow : { high: 4096, mid: 2048, low: 1024 }[QUAL]; sun.shadow.mapSize.set(ms, ms); }   /* 画質 (applyQuality と同じ) */
 sun.shadow.bias = -0.0003; sun.shadow.normalBias = 0.4; scene.add(sun, sun.target);
 scene.fog = new THREE.FogExp2(0xc4d4e2, 0.00035);
 /* かすみ: three の FogExp2 は (距離×濃さ)² で、近くはほとんどかからず遠くで急に白くなる。空気のかすみに近い 1-exp(-距離×濃さ) にする (全部の材質に効く) */
@@ -663,7 +702,8 @@ const FZ_PX = 10, FZ_PAGE = 2048; const fzMats = [];
 const LITE = (() => { const m = location.search.match(/[?&]lite=(-?[\d.]+),(-?[\d.]+)(?:,(\d+))?/); return m ? { x: +m[1], z: +m[2], r: +(m[3] || 700) } : null; })();
 function fzPaint(specs, faces) {
   const pages = []; let cur = null;
-  const newPage = () => { const c = document.createElement('canvas'); c.width = c.height = FZ_PAGE; const l = document.createElement('canvas'); l.width = l.height = FZ_PAGE / 2; const g = c.getContext('2d'); g.fillStyle = '#888'; g.fillRect(0, 0, FZ_PAGE, FZ_PAGE); const gl = l.getContext('2d'); gl.fillStyle = '#000'; gl.fillRect(0, 0, FZ_PAGE, FZ_PAGE); gl.scale(0.5, 0.5); cur = { c, l, g, gl, x: 0, y: 0, rowh: 0, info: new Uint8Array(FZ_PAGE * FZ_PAGE) }; pages.push(cur); };   /* info: 窓の奥行きの情報 (半分の解像度 RGBA, fzInfoRect) */
+  /* スマホ: 描き終わったページはすぐ 1/4 に縮めて、2048 四方の canvas を手放す (全部のページを同時に持つと canvas だけで 1.3GB)。窓の奥行きの情報は作らない */
+  const newPage = () => { if (MOB && cur) { cur.c = mobShrink(cur.c, MOB_K.page, true); cur.l = mobShrink(cur.l, MOB_K.page, true); cur.g = cur.gl = null; } const c = document.createElement('canvas'); c.width = c.height = FZ_PAGE; const l = document.createElement('canvas'); l.width = l.height = FZ_PAGE / 2; const g = c.getContext('2d'); g.fillStyle = '#888'; g.fillRect(0, 0, FZ_PAGE, FZ_PAGE); const gl = l.getContext('2d'); gl.fillStyle = '#000'; gl.fillRect(0, 0, FZ_PAGE, FZ_PAGE); gl.scale(0.5, 0.5); cur = { c, l, g, gl, x: 0, y: 0, rowh: 0, info: MOB ? null : new Uint8Array(FZ_PAGE * FZ_PAGE) }; pages.push(cur); };   /* info: 窓の奥行きの情報 (半分の解像度 RGBA, fzInfoRect) */
   newPage();
   /* 描く順: 300m 四方の区画ごと (北から、西から) に、区画の中では高い面から。ページが狭い範囲にまとまるので、fzBuild でページごとに1つのメッシュにすると
      画面の外・影の範囲の外のページを描かずに済む (区画を混ぜて詰めていた頃は1ページが街じゅうに散り、約1000回の描画を毎フレーム全部していた) */
@@ -681,6 +721,7 @@ function fzPaint(specs, faces) {
     f.page = pages.length - 1; f.rx = cur.x + 1; f.ry = cur.y + 1; f.px = px; cur.x += w; cur.rowh = Math.max(cur.rowh, h);
     fzInfoCur = px >= 4 ? cur.info : null; fzFace(cur.g, cur.gl, f, specs[f.s]);
   }
+  if (MOB) newPage(), pages.pop();   /* 最後のページも縮める (足した空のページは捨てる) */
   return pages;
 }
 function fzRand(seed) { let s = seed % 2147483647 || 1; return () => (s = s * 16807 % 2147483647) / 2147483647; }
@@ -773,8 +814,9 @@ function fzFace(g, gl, f, sp) {
 function fzBuild(head, raw, B) {
   if (!head.faces || !head.faces.length) return;
   const pages = fzPaint(head.specs, head.faces);
-  const mats = pages.map(p => { const t = new THREE.CanvasTexture(p.c); t.flipY = false; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); const tl = new THREE.CanvasTexture(p.l); tl.flipY = false; tl.colorSpace = THREE.SRGBColorSpace;
+  const mats = pages.map(p => { const t = mobOwn(new THREE.CanvasTexture(p.c)); t.flipY = false; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); const tl = mobOwn(new THREE.CanvasTexture(p.l)); tl.flipY = false; tl.colorSpace = THREE.SRGBColorSpace;
     const m = new THREE.MeshStandardMaterial({ map: t, emissiveMap: tl, emissive: 0xffffff, emissiveIntensity: 0, roughness: 0.78, metalness: 0.02, side: THREE.DoubleSide, envMapIntensity: 0.6 }); fzMats.push(m);
+    if (MOB) return m;   /* スマホ: 外壁の立体感 (窓の奥行き・凹凸のシェーダー) なし */
     const ti = new THREE.DataTexture(p.info, FZ_PAGE / 2, FZ_PAGE / 2); ti.flipY = false; ti.magFilter = ti.minFilter = THREE.LinearFilter; ti.generateMipmaps = false; ti.needsUpdate = true; ti.onUpdate = () => { ti.image = { data: null, width: FZ_PAGE / 2, height: FZ_PAGE / 2 }; };   /* GPU に送ったら手元の配列は捨てる */
     fz3dMaterial(m, ti); return m; });
   const perPage = new Map();   /* ページ → [{ src, tri: [...] }] (チャンクをまたいで1つにまとめる) */
@@ -786,7 +828,7 @@ function fzBuild(head, raw, B) {
     const uv = new Float32Array(c.nv * 2), fzA = new Float32Array(c.nv * 4), fzB = new Float32Array(c.nv * 4);   /* 立体感用: 面の座標 (u, y)・面ごとの値 */
     for (let i = 0; i < c.nv; i++) { const f = head.faces[fid[i]]; fz3dAttr(f, head.specs[f.s], fzA, fzB, i); if (f.by === undefined) f.by = pos[i * 3 + 1] - fuv[i * 2 + 1]; if (f.sw) { uv[i * 2] = f.sw[0] / FZ_PAGE; uv[i * 2 + 1] = f.sw[1] / FZ_PAGE; continue; } uv[i * 2] = (f.rx + fuv[i * 2] * f.px) / FZ_PAGE; uv[i * 2 + 1] = (f.ry + (f.H - fuv[i * 2 + 1]) * f.px) / FZ_PAGE; }
     const idx = new Uint16Array(raw.buffer.slice(B + c.idx[0], B + c.idx[0] + c.ni * 2));
-    const src = { position: [pos, 3], uv: [uv, 2], aFace: [fuv, 2], aFz: [fzA, 4], aFz2: [fzB, 4] }, byPage = new Map();   /* 属性の名前: [配列, 1頂点の数] */
+    const src = MOB ? { position: [pos, 3], uv: [uv, 2] } : { position: [pos, 3], uv: [uv, 2], aFace: [fuv, 2], aFz: [fzA, 4], aFz2: [fzB, 4] }, byPage = new Map();   /* 属性の名前: [配列, 1頂点の数] */
     for (let t = 0; t < c.ni; t += 3) { const p = head.faces[fid[idx[t]]].page; if (!byPage.has(p)) byPage.set(p, []); byPage.get(p).push(idx[t], idx[t + 1], idx[t + 2]); }
     for (const [p, tri] of byPage) { if (!perPage.has(p)) perPage.set(p, []); perPage.get(p).push({ src, tri }); }
   }
@@ -802,7 +844,7 @@ function fzBuild(head, raw, B) {
     g.setIndex(new THREE.BufferAttribute(I, 1)); g.computeVertexNormals(); g.computeBoundingSphere(); g.computeBoundsTree();
     const m = new THREE.Mesh(g, mats[p]); m.castShadow = m.receiveShadow = true; scene.add(m); colliders.push(m);
   }
-  fzReliefIndex(head);   /* 近くの建物のベランダ・雨どいなど (facade3d.js) */
+  if (!MOB) fzReliefIndex(head);   /* 近くの建物のベランダ・雨どいなど (facade3d.js)。スマホでは作らない */
 }
 let roofColMat = null;
 async function buildCity() {
@@ -923,6 +965,7 @@ async function buildTrees() {
   for (let i = 0; i < n; i++) {
     const x = xz[i * 2] / 10, z = xz[i * 2 + 1] / 10, y = gy[i] / 20 - 50, h = ht[i] / 10, hs = ((i * 2654435761) >>> 0) / 4294967296;
     const forest = Math.hypot(x + 655, z - 461) < 420 || y > 40, md = forest ? 1e9 : moatD(x, z);
+    if (MOB && forest && (i & 1)) continue;   /* スマホ: 森 (城山) の木を半分に */
     const kind = md < 28 ? (hs < 0.45 ? 'pine' : hs < 0.72 ? 'sakura' : 'broad') : forest ? (hs < 0.93 ? 'broad' : hs < 0.97 ? 'sakura' : 'keyaki') : h > 11 ? (hs < 0.8 ? 'broad' : 'keyaki') : hs < 0.55 ? 'broad' : hs < 0.93 ? 'keyaki' : 'sakura';
     const cr = col[i * 3] / 255, cg = col[i * 3 + 1] / 255, cb = col[i * 3 + 2] / 255, cm = (cr + cg + cb) / 3, br = Math.max(0.82, Math.min(1.18, 0.72 + (0.3 * cr + 0.6 * cg + 0.1 * cb) * 1.3));
     const r = h * (kind === 'pine' ? 0.4 : kind === 'keyaki' ? 0.27 : 0.3) * (0.9 + 0.25 * ((i * 7919) % 13) / 13);
@@ -3967,7 +4010,10 @@ function startFree(keepPos, where) { resetFences();
   ui.msg.textContent = 'FREE DRIVE'; ui.msg.hidden = false; setTimeout(() => { if (state === 'free') ui.msg.hidden = true; }, 1500);
 }
 document.querySelectorAll('[data-time]').forEach(b => b.addEventListener('click', () => setTime(b.dataset.time)));
-$('qualSel').value = QAUTO ? 'auto' : QUAL; $('qualSel').addEventListener('change', e => applyQuality(e.target.value));   /* 画質 自動・高・中・低 (applyQuality) */
+$('qualSel').value = MOB ? 'mobile' : QAUTO ? 'auto' : QUAL; $('qualSel').addEventListener('change', e => { const v = e.target.value; let st = null; try { st = localStorage.getItem('mcr_mob'); } catch (er) {}
+  /* 「スマホ (軽量)」は読み込む物から変わるので読み込み直す。手でスマホを選んでいた所から別の画質にするときも読み込み直す (自動でスマホと判定した端末は、軽い読み込みのまま描き方だけ変える) */
+  if (v === 'mobile') { try { localStorage.setItem('mcr_mob', '1'); localStorage.setItem('mcr_q', 'low'); } catch (er) {} location.reload(); return; }
+  applyQuality(v); if (MOB && st === '1') { try { localStorage.removeItem('mcr_mob'); } catch (er) {} location.reload(); } });   /* 画質 自動・高・中・低 (applyQuality) */
 $('shadowToggle').addEventListener('change', e => { renderer.shadowMap.enabled = e.target.checked; scene.traverse(o => { if (o.material) [].concat(o.material).forEach(m => m.needsUpdate = true); }); });
 
 function placeAtDogo() {
@@ -6143,6 +6189,7 @@ const GRASS_KIND = [
   { cell: 2, h: [0.4, 0.95], w: [0.45, 0.8], dry: 0.35, dark: 1.0 },
   { cell: 1, h: [0.25, 0.6], w: [0.4, 0.7], dry: 0.12, dark: 0.78 }];
 async function buildGrass() {
+  if (MOB) return;   /* スマホ: 草なし */
   try { const r = await fetch('ground.dat.wasm'); if (r.ok) { const gr = await gunzip(new Uint8Array(await r.arrayBuffer())); const dv = new DataView(gr.buffer, gr.byteOffset); GRASS.CW = dv.getUint32(0, true); GRASS.CH = dv.getUint32(4, true); GRASS.cls = gr.subarray(8, 8 + GRASS.CW * GRASS.CH); } }
   catch (e) { console.warn('grass: ground.dat.wasm', e); }
   /* 決まった線に沿う草 (中央分離帯・空き地や駐車場の縁・フェンスと電柱の根元・お堀の土手の縁) を升目ごとにためておく */
@@ -6820,7 +6867,7 @@ function applyQuality(q, fromAuto) {
   if (!fromAuto) { QAUTO = q === 'auto' || !QUAL_PR[q]; try { localStorage.setItem('mcr_q', QAUTO ? 'auto' : q); } catch (e) {} if (QAUTO) { q = 'low'; QA.t0 = -1; } }
   QUAL = q; HQ = q !== 'low';
   renderer.setPixelRatio(qualPR());
-  const ms = { high: 4096, mid: 2048, low: 1024 }[q]; if (sun.shadow.mapSize.x !== ms) { sun.shadow.mapSize.set(ms, ms); if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; } }
+  const ms = MOB ? MOB_K.shadow : { high: 4096, mid: 2048, low: 1024 }[q]; if (sun.shadow.mapSize.x !== ms) { sun.shadow.mapSize.set(ms, ms); if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; } }
   if (aoPass) aoPass.ao = q === 'high';   /* パス自体は NaN を消す入口としていつも通す。AO は「高」だけ */
   FAR_CULL = { high: 300, mid: 240, low: 180 }[q]; farCull.t = -1e9; for (const e of farCull.list) e.far = undefined;   /* 遠くの小物を省く距離 (描画呼び出し数が減る) */
   if (typeof resize === 'function') resize();
@@ -6829,7 +6876,7 @@ function applyQuality(q, fromAuto) {
    上げた後に下がったら、その段にはもう上げない (QA.ban) */
 const QA = { t0: -1, n: 0, sum: 0, good: 0, last: 0, ban: {} };
 function qualAuto(now) {
-  if (!QAUTO) return; const dt = now - QA.last; QA.last = now; if (dt > 250 || document.hidden) return;   /* 止まっていた間・裏のタブは数えない */
+  if (!QAUTO || MOB) return; const dt = now - QA.last; QA.last = now; if (dt > 250 || document.hidden) return;   /* 止まっていた間・裏のタブは数えない */
   if (QA.t0 < 0) { QA.t0 = now; QA.n = 0; QA.sum = 0; return; } QA.n++; QA.sum += dt; if (now - QA.t0 < 3000) return;
   const avg = QA.sum / QA.n; QA.t0 = now; QA.n = 0; QA.sum = 0; const L = ['low', 'mid', 'high'], i = L.indexOf(QUAL);
   if (avg > 22 && i > 0) { if (QA.up) QA.ban[QUAL] = true; QA.up = false; QA.good = 0; applyQuality(L[i - 1], true); }
@@ -7484,7 +7531,9 @@ function eihimePlate(type) {
 async function loadRealCars() {
   let raw; try { raw = await fetchBytes('cars2.dat.wasm', 10700000); } catch (e) { console.warn('cars2', e); return; }
   const hl = new DataView(raw.buffer, raw.byteOffset).getUint32(0, true); const head = JSON.parse(new TextDecoder().decode(raw.subarray(4, 4 + hl))); let o = 4 + hl; const loader = new GLTFLoader(); const kinds = new Set();
+  const MOB_CARS = new Set(['nbox', 'carry', 'prius', 'hiace', 'jpntaxi', 'rav4', 'camry', 'coaster', 'ergamio', 'dutro']);   /* スマホ: 種類ごとに1車種だけ (大型トラック・観光バスは作りものの車) */
   for (const [name, len, cfg] of head) {
+    if (MOB && !MOB_CARS.has(name)) { o += len; continue; }
     const buf = raw.slice(o, o + len).buffer; o += len; let m;
     try { m = (await loader.parseAsync(buf, '')).scene; } catch (e) { console.warn('car', name, e); continue; }
     /* 一部の車種は車体がボーン付き (SkinnedMesh)。clone(true) した複製が元のボーンを共有して元の位置に描かれ、複製にはタイヤだけが残るので、
@@ -8518,7 +8567,7 @@ function pplCands(R) {
   const L = []; let tot = 0; const gx = Math.floor(R.x / 60), gz = Math.floor(R.z / 60), n = Math.ceil(PPL_R / 60);
   for (let a = -n; a <= n; a++) for (let b = -n; b <= n; b++) for (const ci of PPL.cgrid.get((gx + a) + ',' + (gz + b)) || []) { const c = PPL.chunks[ci]; if (Math.hypot(c.x - R.x, c.z - R.z) > PPL_R || !pplChunkOk(c)) continue; tot += c.dens * (1 + Math.max(0, c.dens - 0.5) * 0.9) * (c.s1 - c.s0); L.push([tot, ci]); }   /* 繁華街ほど人が詰まる (昼の大街道・銀天街は 20m に十数人) */
   PPL.cand = L; PPL.candTot = tot; PPL.candAt = { x: R.x, z: R.z };
-  PPL.target = Math.min(PPL_POOL, Math.round(tot * 0.055 * (pplNight() ? 0.45 : 1)));
+  PPL.target = Math.min(PPL_POOL, Math.round(tot * 0.055 * (pplNight() ? 0.45 : 1) * (MOB ? MOB_K.ppl : 1)));
 }
 function pplNight() { try { return winUniforms.uNight.value > 0.5; } catch (e) { return false; } }
 function pplPickChunk(far, cam) {
@@ -9400,8 +9449,8 @@ function frame(now) {
     await buildFill(aer); tlog('buildFill'); await buildTrees(); tlog('buildTrees'); buildRoads(); tlog('buildRoads'); buildSidewalks(); tlog('buildSidewalks'); buildArcades(); tlog('buildArcades'); buildDeptRoofCourt(); buildCheckpoints(); tlog('buildCheckpoints'); buildTrams(); tlog('buildTrams'); buildDogoHonkan(); tlog('buildDogoHonkan'); addBotchan(); tlog('addBotchan'); buildShieki(); buildEkimaeRow(); buildPlazaNorth(); tlog('buildShieki'); buildSignals(); tlog('buildSignals'); buildTramStops(); tlog('buildTramStops'); buildStations(); tlog('buildStations'); buildCatenary(); tlog('buildCatenary'); buildMoats(); tlog('buildMoats'); buildCastle(); tlog('buildCastle'); buildKencho(); tlog('buildKencho'); buildJRStation(); tlog('buildJRStation'); buildSubTrains(); tlog('buildSubTrains'); buildStationHall(); buildSkybridge(); buildRoofStuff(); tlog('buildRoofStuff'); buildLandmarks(); tlog('buildLandmarks'); buildHotels(); buildNhkTower(); buildMedianAndBridges(); tlog('buildMedianAndBridges');
     buildStreetLamps(); tlog('buildStreetLamps'); buildStreetFurniture(); tlog('buildStreetFurniture'); buildCampusGround(); buildLots(); buildHanazono(); buildFences(); buildShopSigns(); buildRedCross(); buildKenchoMae(); /* 県庁前の工事現場2か所 (kenchomae.js) */ buildFootbridges(); buildEkiSkywalks(); if (window.BUSOPS) BUSOPS.prep(G); /* 路線運行 (busops.js): こちら側の歩道に標柱を足す */ buildBusStops(); buildTakashimayaFill(); tlog('buildCampusGround'); buildDash(); tlog('buildDash'); await buildGrass().catch(e => console.warn('grass', e)); tlog('buildGrass');
     progress('一般車を読み込み中…');
-    try { await loadTrafficModels(); tlog('loadTrafficModels'); try { swapLotCars(); } catch (e) { console.warn('lots cars', e); } buildTraffic(60); tlog('buildTraffic'); try { placeDealerCars(); } catch (e) { console.warn('dealer', e); } } catch (err) { console.warn('traffic', err); }
-    buildPeds(90); tlog('buildPeds'); buildBikes(100); tlog('buildBikes'); try { await loadPeople(); tlog('loadPeople'); } catch (e) { console.warn('people', e); }
+    try { await loadTrafficModels(); tlog('loadTrafficModels'); try { swapLotCars(); } catch (e) { console.warn('lots cars', e); } buildTraffic(MOB ? MOB_K.cars : 60); tlog('buildTraffic'); try { placeDealerCars(); } catch (e) { console.warn('dealer', e); } } catch (err) { console.warn('traffic', err); }
+    buildPeds(MOB ? MOB_K.peds : 90); tlog('buildPeds'); buildBikes(MOB ? MOB_K.bikes : 100); tlog('buildBikes'); try { await loadPeople(); tlog('loadPeople'); } catch (e) { console.warn('people', e); }
     try { const model = await loadCarModel(); const proto = model.clone(true); car = prepareCar(model, false); ghostCar = prepareCar(proto.clone(true), true); try { addBuses(proto); addTaxiRank(); try { buildGaisen(proto); } catch (e3) { console.warn('gaisen', e3); } } catch (e2) { console.warn('buses', e2); } }
     catch (err) { console.error('bus model failed', err); progress('バスのモデルが読み込めませんでした。ページを読み込み直してください'); throw err; }   /* 古い手作りの箱のバス (buildRouteBus) は出さない */
     car.traverse(o => { if (o.isMesh && !o.material.transparent) o.castShadow = true; }); scene.add(car);
@@ -9410,6 +9459,7 @@ function frame(now) {
     placeAt(0); updateCarVisual(0);
     ui.best.textContent = best ? fmt(best) : '--';
     window.__app = { BUS_TUNE, FENCE, knockFences, updateFenceDebris, cpObjs, startFree, getState: () => state, startOmake, GAISEN, updateOmakeCam, omakeCycle, updateGaisen, makeTram2100, makeSubCar, trains, xings, tramXs, subLines, updateTrains, renderer, scene, camera, S, THREE, startRace, setCourse, keys, car: () => car, colliders, G: () => G, groundAt, physics, trams, updateTrams, tramCollide, traffic, updateTraffic, trafficCollide, peds, updatePeds, setTime, renderFrame, setCam: m => { camMode = m; }, setState: s => { state = s; }, updateCarVisual, startFly, updateFly, FLY, makeTram50, makeTram5000, makeTram2100, makeBotchan, signals, onCarriageway, roadNet: () => roadNet, peds, STOPLINES, sigState, placeAt, updateSignals, SIGX, sigLamp, sigPed, sigPedAt, sigSet: t => { sigT = t; updateSignals(0, true); }, sigGet: () => sigT };
+    try { mobFinish(); } catch (e) { console.warn('mobFinish', e); }
     $('loading').hidden = true; $('menu').hidden = false; document.body.classList.add('inmenu');
     requestAnimationFrame(frame);
   } catch (e) { console.error(e); $('loadmsg').textContent = '読み込みに失敗しました：' + e.message; }
@@ -9692,6 +9742,7 @@ const SND = {
       else if (mat === 'wood') { thump(95, 45, 0.5 * k, 0.25); noise('highpass', 1800, 0.7, 0.5 * k, 0.07); noise('bandpass', 900, 2, 0.35 * k, 0.05, null, 0.06); noise('bandpass', 700, 1.5, 0.25 * k, 0.12, null, 0.13);   /* 幹がバキッと折れる (乾いた割れる音が2〜3回) */
         noise('bandpass', 3500, 0.6, 0.12 * k, 0.9, S2.pink, 0.05); }   /* 葉がざわっ */
       else if (mat === 'pot') { thump(180, 90, 0.3 * k, 0.1); for (let j = 0; j < 5; j++) noise('bandpass', 2200 + Math.random() * 2500, 6, 0.12 * k, 0.05, null, 0.02 + Math.random() * 0.15); noise('lowpass', 600, 0.7, 0.2 * k, 0.25, S2.brown, 0.05); }   /* 陶器が割れて土がこぼれる */
+      else if (mat === 'concrete') { thump(75, 38, 0.6 * k, 0.32); noise('lowpass', 1100, 0.7, 0.45 * k, 0.22, S2.brown); noise('bandpass', 2400, 1.0, 0.22 * k, 0.09, null, 0.02); noise('bandpass', 1500, 1.2, 0.18 * k, 0.15, S2.pink, 0.1); }   /* コンクリートの柱: ドンと鈍い音と、ひびが割れるバリバリ */
       else if (mat === 'cloth') { noise('bandpass', 1200, 0.8, 0.18 * k, 0.25, S2.pink); thump(220, 120, 0.08 * k, 0.08); }   /* のぼりの竿がカンと倒れ、布がばさっ */
       else { thump(260, 150, 0.32 * k, 0.09); noise('bandpass', 1400, 1.5, 0.22 * k, 0.1); if (mat === 'arm') noise('highpass', 2500, 0.8, 0.25 * k, 0.05); }   /* プラスチックのボコッ、遮断かんはパキッ */
     }); this.count('knock_' + mat);
@@ -9700,7 +9751,7 @@ const SND = {
   knockLand(mat, e, x, z) {
     if (!this.C) return; const R = this.rel(x, z), a = this.att(R.d, 8, 100) * Math.min(1, e / 10 + 0.2); if (a < 0.01) return;
     this.shot(1, 1.4, function knockLand(t0) { const S2 = SND, out = S2.g(a), p = S2.pan(R.pan); out.connect(p); p.connect(S2.sfx);
-      const big = mat === 'wood', n = S2.nz(big ? S2.pink : S2.white, false), f = S2.f(big ? 'lowpass' : 'bandpass', big ? 2500 : mat === 'metal' ? 3000 : 1300, big ? 0.6 : 1.4), g = S2.g(0);
+      const big = mat === 'wood' || mat === 'concrete', n = S2.nz(mat === 'concrete' ? S2.brown : big ? S2.pink : S2.white, false), f = S2.f(big ? 'lowpass' : 'bandpass', big ? 2500 : mat === 'metal' ? 3000 : 1300, big ? 0.6 : 1.4), g = S2.g(0);
       n.connect(f); f.connect(g); g.connect(out); g.gain.setValueAtTime(big ? 0.4 : 0.2, t0); g.gain.exponentialRampToValueAtTime(0.0005, t0 + (big ? 1.1 : 0.2)); n.start(t0); n.stop(t0 + 1.2);   /* 木は枝と葉がザザッ */
       const o = S2.o('sine', big ? 70 : 160), og = S2.g(0); o.frequency.exponentialRampToValueAtTime(big ? 35 : 80, t0 + 0.2); og.gain.setValueAtTime(big ? 0.5 : 0.15, t0); og.gain.exponentialRampToValueAtTime(0.0005, t0 + 0.3); o.connect(og); og.connect(out); o.start(t0); o.stop(t0 + 0.35);
       if (mat === 'metal') { const m = S2.o('triangle', 880 + Math.random() * 300), mb = S2.f('bandpass', 1500, 8), mg = S2.g(0); m.connect(mb); mb.connect(mg); mg.connect(out); mg.gain.setValueAtTime(0.06, t0); mg.gain.exponentialRampToValueAtTime(0.0005, t0 + 0.5); m.start(t0); m.stop(t0 + 0.55); }
@@ -12909,23 +12960,29 @@ function dgIsaniwa() {
 
 /* ================= 当たり判定と、なぎ倒せる物 (hit.js) =================
    mk.py が app.js の後ろにつなげる (同じ module なので S, scene, colliders, TREES, GRASS, xings, groundAt, audio, bump などがそのまま見える)。
-   1. 止まる物 (solid): 建物 (colliders、app.js の physics が光線で見る) 以外の、地面に立っている動かない物を全部拾う。
-      読み込み後に scene を2回 (2.5秒あけて) 調べ、2回とも同じ位置にある Mesh / InstancedMesh の1本ずつを、足元の形 (円 or 回転した箱) と高さにする。
-      25m より大きいまとめた Mesh (merge した柵・上屋・案内標識など) は、立った面 (三角形) を 0.5m 升目に塗って箱にする。
-   2. なぎ倒せる物 (knock): 細い街路樹、踏切の警報機と遮断かん、標識、のぼり、立て看板、カーブミラー、自転車、植木鉢、ゴミ置き場、コーン。
+   1. 地面に立っている動かない物を全部拾う (建物 colliders は今までどおり app.js の physics が光線で見る)。
+      読み込み後に scene を2回 (2.5秒あけて) 調べ、2回とも同じ位置にある Mesh / InstancedMesh だけを使う (動く物は外れる)。
+      部品 = インスタンスの1本 / 小さい Mesh / まとめた (merge した) Mesh の中のつながった三角形。部品の箱が触れ合うものを1つの「物」にまとめる。
+      - 地面に立つ小さい物 (足元が 1.4m 以内・高さ 15m 以内、屋根や高架のような大きい物を支えていない) → なぎ倒せる (auto)。
+        街灯・架線柱・信号の柱 (腕と灯器ごと)・標識・案内板・自販機・ベンチ・車止めなど。重い物ほど倒れにくく (K.v)、倒すとバスが減速する (K.slow)。
+      - それ以外 (大きい物・つながって長い物) → 止まる物 (足元の形 = 円 or 回転した箱、まとめた Mesh は立った三角形を 0.5m 升目に塗る)。
+   2. 目印の付いたなぎ倒せる物: 細い街路樹、踏切の警報機と遮断かん、電柱、標識、のぼり、立て看板、カーブミラー、自転車、植木鉢、ゴミ置き場、コーン。
       目印: InstancedMesh / Mesh の userData.hit = '種類' (同じ足元の位置のインスタンスを1つにまとめる)、merge する前の geometry の userData.hit = { id, k } (hitMerged)。
-      当たると、元のインスタンス (または merge した頂点の範囲) を消して、同じ形の破片を倒す (根元を軸に倒れる) か飛ばす。HIT.LIFE 秒たって、バスとカメラから離れていたら元に戻す。
-   3. 草: 自分のバスの前の端の通り道を覚えて (HIT.trail)、草のシェーダーでその上の株を寝かせ、数秒で起こす。
-   重さ: 全部 8m 升目のグリッドに入れて、バスのまわりの升目だけ調べる。window.__hit に数と時間。 */
+   3. 止めてある車 (駐車場 LOT_PARKED): ぶつかると重さ (バス 11t、軽 0.9t〜ワゴン 1.9t) に応じて押されて・はね飛んで・回る。ほかの止めてある車や柱・建物にも当たる。
+      走っている車・客待ちのタクシー・信号待ちの車は app.js の trafficCollide (今までどおり)。
+   当たると、元のインスタンス (または merge した頂点) を消して、同じ形の破片を倒す (根元を軸に倒れる) か飛ばす。HIT.LIFE 秒たって、バスとカメラから離れていたら元に戻す。
+   背の高い物 (5m 超) が倒れると、その上につながる電線・架線 (LineSegments) を、隣の同じ柱までの範囲で隠す (道路わきの電柱は overhead.js の ohTick)。
+   4. 草: 自分のバスの前の端の通り道を覚えて (HIT.trail)、草のシェーダーでその上の株を寝かせ、数秒で起こす。
+   重さ: 全部 8m 升目のグリッドに入れて、バスのまわりの升目だけ調べる。読み込み後の調べは1フレーム 10ms ずつに分ける。window.__hit に数と時間。 */
 const HIT = {
-  C: 8, grid: new Map(), items: [], down: [], deb: [], xs: [], arms: [], ready: 0, snapA: null, tA: 0, treeParts: 0, stamp: 0, merged: new Map(),
-  LIFE: 45, trail: null, trailN: 64, trailI: 0, trailLast: null, ms: 0, msMax: 0, hits: 0, knocks: 0,
+  C: 8, grid: new Map(), items: [], down: [], deb: [], cars: [], xs: [], arms: [], wires: [], ready: 0, snapA: null, tA: 0, treeParts: 0, stamp: 0, merged: new Map(), gen: null, rej: {},
+  LIFE: 45, trail: null, trailN: 64, trailI: 0, trailLast: null, ms: 0, msMax: 0, hits: 0, knocks: 0, MB: 11000,
   KIND: {   /* mat: 音の種類、v: これより遅いと倒れずに止まる (m/s)、slow: 倒したときにバスの速さを減らす割合、mode: tip (根元で倒れる) / fly (飛ぶ) */
     tree: { mat: 'wood', v: 2.2, slow: 0.16, mode: 'tip' },
     xing: { mat: 'metal', v: 1.5, slow: 0.07, mode: 'tip' },
     arm: { mat: 'plastic', v: 0.3, slow: 0.01, mode: 'fly' },
     sign: { mat: 'metal', v: 1.2, slow: 0.04, mode: 'tip' },
-    pole: { mat: 'wood', v: 2.5, slow: 0.22, mode: 'tip' },   /* 電柱 (コンクリート 11m): 重いのでバスがかなり減速する */
+    pole: { mat: 'concrete', v: 1.8, slow: 0.22, mode: 'tip' },   /* 電柱 (コンクリート 11m): 重いのでバスがかなり減速する */
     mirror: { mat: 'metal', v: 1.2, slow: 0.04, mode: 'tip' },
     tate: { mat: 'plastic', v: 0.8, slow: 0.03, mode: 'tip' },
     nobo: { mat: 'cloth', v: 0.3, slow: 0.005, mode: 'tip' },
@@ -12934,10 +12991,12 @@ const HIT = {
     gomi: { mat: 'plastic', v: 0.5, slow: 0.02, mode: 'fly' },
     cone: { mat: 'plastic', v: 0.2, slow: 0.003, mode: 'fly' },
   },
+  CARM: { kei: 900, compact: 1150, sedan: 1450, minivan: 1900 },   /* 止めてある車の重さ (kg) */
 };
 window.__hit = HIT; HIT.step = () => hitStep(); HIT.update = dt => hitUpdate(dt); HIT.reset = () => hitReset();   /* テスト (tools/_hit_*.js) から呼ぶ */
 const hitKey = (cx, cz) => (cx + 4096) * 8192 + cz + 4096;
 const _hM = new THREE.Matrix4(), _hM2 = new THREE.Matrix4(), _hV = new THREE.Vector3(), _hV2 = new THREE.Vector3(), _hQ = new THREE.Quaternion(), _hS = new THREE.Vector3(), _hC = new THREE.Color(), _hZero = new THREE.Matrix4().makeScale(0, 0, 0);
+const hitK = it => it.K || HIT.KIND[it.k];
 function hitAdd(it) {
   it.id = HIT.items.length; it.q = 0; HIT.items.push(it);
   const R = it.box ? Math.hypot(it.hx, it.hz) : it.r, C = HIT.C;
@@ -12967,13 +13026,16 @@ function hitOverlap(it, fx, fz, rx, rz, grow) {
     if (ar < af) { const s = pr > 0 ? -1 : 1; _hRes.nx = rx * s; _hRes.nz = rz * s; _hRes.pen = ar + it.r; } else { const s = pf > 0 ? -1 : 1; _hRes.nx = fx * s; _hRes.nz = fz * s; _hRes.pen = af + it.r; }
     return _hRes;
   }
-  /* 回転した箱どうし: 4つの軸で分離を調べ、いちばん浅い軸で押し出す */
-  const ux = it.ca, uz = it.sa, vx = -it.sa, vz = it.ca; let best = 1e9, bx = 0, bz = 0;
-  for (let a = 0; a < 4; a++) { const axx = a === 0 ? rx : a === 1 ? fx : a === 2 ? ux : vx, axz = a === 0 ? rz : a === 1 ? fz : a === 2 ? uz : vz;
-    const rb = W * Math.abs(rx * axx + rz * axz) + L * Math.abs(fx * axx + fz * axz), ri = it.hx * Math.abs(ux * axx + uz * axz) + it.hz * Math.abs(vx * axx + vz * axz);
-    const c = dx * axx + dz * axz, o = rb + ri - Math.abs(c); if (o <= 0) return null;
-    if (o < best) { best = o; const s = c >= 0 ? 1 : -1; bx = axx * s; bz = axz * s; } }
-  _hRes.nx = bx; _hRes.nz = bz; _hRes.pen = best; return _hRes;
+  return hitObb(S.x, S.z, rx, rz, W, L, it.x, it.z, it.ca, it.sa, it.hx, it.hz);
+}
+/* 回転した箱どうし (a: 中心・横の軸 (ux, uz)・半幅 aw・半長 al、b も同じ、b の長さの軸は (-sa, ca)): 4つの軸で分離を調べ、いちばん浅い軸で a を押し出す向き */
+function hitObb(ax, az, ux, uz, aw, al, bx, bz, ca, sa, bw, bl) {
+  const vx = -uz, vz = ux, px = ca, pz = sa, qx = -sa, qz = ca, dx = ax - bx, dz = az - bz; let best = 1e9, nx = 0, nz = 0;
+  for (let a = 0; a < 4; a++) { const tx = a === 0 ? ux : a === 1 ? vx : a === 2 ? px : qx, tz = a === 0 ? uz : a === 1 ? vz : a === 2 ? pz : qz;
+    const ra = aw * Math.abs(ux * tx + uz * tz) + al * Math.abs(vx * tx + vz * tz), rb = bw * Math.abs(px * tx + pz * tz) + bl * Math.abs(qx * tx + qz * tz);
+    const c = dx * tx + dz * tz, o = ra + rb - Math.abs(c); if (o <= 0) return null;
+    if (o < best) { best = o; const s = c >= 0 ? 1 : -1; nx = tx * s; nz = tz * s; } }
+  _hRes.nx = nx; _hRes.nz = nz; _hRes.pen = best; return _hRes;
 }
 /* ---- 毎回の物理の後 (frame の physics のループ) ---- */
 function hitStep() {
@@ -12983,9 +13045,13 @@ function hitStep() {
   for (let cx = Math.floor((S.x - ax) / C); cx <= Math.floor((S.x + ax) / C); cx++) for (let cz = Math.floor((S.z - az) / C); cz <= Math.floor((S.z + az) / C); cz++) {
     const L = HIT.grid.get(hitKey(cx, cz)); if (!L) continue;
     for (const it of L) { if (it.q === st || it.down) continue; it.q = st; if (it.y1 < y0 || it.y0 > y1) continue;
-      const o = hitOverlap(it, fx, fz, rx, rz, it.k ? 0.05 : 0); if (!o) continue;
-      if (it.k) { const K = HIT.KIND[it.k]; if (Math.abs(S.v) >= K.v) { hitKnock(it, o.nx, o.nz); continue; } }
+      const o = hitOverlap(it, fx, fz, rx, rz, it.k && !it.car ? 0.05 : 0); if (!o) continue;
+      if (it.car) { hitCarPush(hitCarStart(it), o, fx, fz, rx, rz); continue; }   /* 止めてある車: 動き出す */
+      if (it.k) { const K = hitK(it); if (Math.abs(S.v) >= K.v) { hitKnock(it, o.nx, o.nz); continue; } }
       hitSolid(o.nx, o.nz, o.pen, fx, fz); HIT.last = it; } }
+  /* 動いている (押した・はねた) 車 */
+  for (const d of HIT.cars) { if (Math.abs(d.x - S.x) > 12 || Math.abs(d.z - S.z) > 12 || d.lift > 2.6) continue;
+    const o = hitObb(S.x, S.z, rx, rz, HIT_BW, HALF, d.x, d.z, Math.cos(d.h), -Math.sin(d.h), d.hw, d.hl); if (o) hitCarPush(d, o, fx, fz, rx, rz); }
   /* 踏切の遮断かん (下りている時だけ): かんの上の点がバスの箱に入ったら折って飛ばす */
   for (const A of HIT.arms) { if (A.down || Math.abs(A.x - S.x) > 20 || Math.abs(A.z - S.z) > 20) continue; const lift = A.lift; if (!lift.parent || lift.rotation.z > 0.4) continue;
     const m = A.mesh.matrixWorld.elements, cxw = m[12], czw = m[14], dxw = m[0], dzw = m[2], hl = A.len / 2;
@@ -13001,33 +13067,51 @@ function hitSolid(nx, nz, pen, fx, fz) {
   else if (into > 0) { S.v *= 1 - 0.5 * into; if (sp > 5 && into > 0.2) { bump = Math.max(bump, 0.2); audio.thud(sp * into); } }
 }
 /* ---- 倒す ---- */
-function hitKnock(it, nx, nz) {
-  const K = HIT.KIND[it.k], sp = Math.abs(S.v), sg = Math.sign(S.v || 1), fx = Math.sin(S.h) * sg, fz = Math.cos(S.h) * sg;
-  /* 倒れる向き: バスの進む向き + バスの中心から外へ (横でこすった物は横へ) */
-  let dx = fx - nx * 0.6, dz = fz - nz * 0.6; const dl = Math.hypot(dx, dz) || 1; dx /= dl; dz /= dl;
-  it.down = true; it.downT = 0; HIT.down.push(it); HIT.knocks++;
-  const D = new THREE.Group(); D.position.set(it.x, it.py, it.z); scene.add(D); D.updateMatrixWorld();
-  _hM2.copy(D.matrixWorld).invert(); it.saved = [];
+/* 部品を元の場所から消して、破片の入れ物 D (世界の位置・向き) の子に同じ形を作る。it.saved に戻すための値 */
+function hitDetach(it, D) {
+  D.updateMatrixWorld(); _hM2.copy(D.matrixWorld).invert(); it.saved = [];
   for (const p of it.parts) {
     if (p.im) {   /* インスタンスの1本: 消して、同じ形の 1本だけの InstancedMesh を破片にする */
       p.im.getMatrixAt(p.i, _hM); const keep = _hM.clone(); p.im.setMatrixAt(p.i, _hZero); p.im.instanceMatrix.needsUpdate = true; it.saved.push(keep);
       const d = new THREE.InstancedMesh(p.geo || p.im.geometry, p.mat || p.im.material, 1); d.frustumCulled = false; d.castShadow = true;
       d.setMatrixAt(0, _hM.premultiply(p.im.matrixWorld).premultiply(_hM2)); if (p.im.instanceColor) { p.im.getColorAt(p.i, _hC); d.setColorAt(0, _hC); } D.add(d);
-    } else if (p.mesh) {   /* merge した Mesh の頂点の範囲: 1点につぶして、その範囲の三角形で破片を作る */
+    } else if (p.mesh) {   /* merge した Mesh の頂点の範囲 (目印): 1点につぶして、その範囲の三角形で破片を作る */
       const g = p.mesh.geometry, pos = g.attributes.position, a = pos.array.slice(p.start * 3, (p.start + p.count) * 3); it.saved.push(a);
       const ng = new THREE.BufferGeometry(); for (const [nm, at] of Object.entries(g.attributes)) ng.setAttribute(nm, new THREE.BufferAttribute(at.array.slice(p.start * at.itemSize, (p.start + p.count) * at.itemSize), at.itemSize, at.normalized));
       if (g.index) { const I = g.index.array, sub = []; for (let q = 0; q < I.length; q++) if (I[q] >= p.start && I[q] < p.start + p.count) sub.push(I[q] - p.start); ng.setIndex(sub); }   /* index のある merge: 範囲の頂点だけを使う三角形 */
-      ng.translate(-it.x, -it.py, -it.z); for (let q = p.start; q < p.start + p.count; q++) pos.setXYZ(q, it.x, it.py, it.z); pos.needsUpdate = true;
+      ng.applyMatrix4(_hM.multiplyMatrices(_hM2, p.mesh.matrixWorld)); _hV.set(it.x, it.py, it.z).applyMatrix4(_hM.copy(p.mesh.matrixWorld).invert());
+      for (let q = p.start; q < p.start + p.count; q++) pos.setXYZ(q, _hV.x, _hV.y, _hV.z); pos.needsUpdate = true;
       const d = new THREE.Mesh(ng, p.mesh.material); d.castShadow = true; D.add(d);
+    } else if (p.tm) {   /* まとめた Mesh のつながった三角形 (自動で見つけた物) */
+      const g = p.tm.geometry, pos = g.attributes.position, I = g.index, T = p.tris, n = T.length * 3, sv = new Float32Array(n * 3); it.saved.push(sv);
+      const ng = new THREE.BufferGeometry();
+      for (const [nm, at] of Object.entries(g.attributes)) { if (at.isInterleavedBufferAttribute) continue; const s = at.itemSize, src = at.array, A = new src.constructor(n * s); let w = 0;
+        for (let q = 0; q < T.length; q++) for (let c = 0; c < 3; c++) { const v = I ? I.getX(T[q] * 3 + c) : T[q] * 3 + c; for (let e = 0; e < s; e++) A[w++] = src[v * s + e]; }
+        ng.setAttribute(nm, new THREE.BufferAttribute(A, s, at.normalized)); }
+      if (Array.isArray(p.tm.material) && g.groups.length) { let gs = 0, gi = -1; for (let q = 0; q <= T.length; q++) { let k = -1; if (q < T.length) { const t3 = T[q] * 3; k = g.groups.findIndex(G => t3 >= G.start && t3 < G.start + G.count); }
+          if (q === T.length || k !== gi) { if (gi >= 0 && q > gs) ng.addGroup(gs * 3, (q - gs) * 3, g.groups[gi].materialIndex); gs = q; gi = k; } } }
+      ng.applyMatrix4(_hM.multiplyMatrices(_hM2, p.tm.matrixWorld)); _hV.set(it.x, it.py, it.z).applyMatrix4(_hM.copy(p.tm.matrixWorld).invert());
+      let w = 0; for (let q = 0; q < T.length; q++) for (let c = 0; c < 3; c++) { const v = I ? I.getX(T[q] * 3 + c) : T[q] * 3 + c; sv[w++] = pos.getX(v); sv[w++] = pos.getY(v); sv[w++] = pos.getZ(v); pos.setXYZ(v, _hV.x, _hV.y, _hV.z); }
+      pos.needsUpdate = true; const d = new THREE.Mesh(ng, p.tm.material); d.castShadow = true; D.add(d);
+    } else if (p.pt) {   /* 点 (街灯の夜のにじみ): 地面の下へ */
+      const pos = p.pt.geometry.attributes.position; it.saved.push(pos.getY(p.i)); pos.setY(p.i, -1e4); pos.needsUpdate = true;
     } else if (p.obj) {   /* ふつうの Object3D: そのまま外して破片にする (戻すときは元の親へ) */
       const o = p.obj; it.saved.push({ parent: o.parent, pos: o.position.clone(), q: o.quaternion.clone(), s: o.scale.clone() }); D.attach(o);
     }
   }
+}
+function hitKnock(it, nx, nz) {
+  const K = hitK(it), sp = Math.abs(S.v), sg = Math.sign(S.v || 1), fx = Math.sin(S.h) * sg, fz = Math.cos(S.h) * sg;
+  /* 倒れる向き: バスの進む向き + バスの中心から外へ (横でこすった物は横へ) */
+  let dx = fx - nx * 0.6, dz = fz - nz * 0.6; const dl = Math.hypot(dx, dz) || 1; dx /= dl; dz /= dl;
+  it.down = true; it.downT = 0; HIT.down.push(it); HIT.knocks++;
+  const D = new THREE.Group(); D.position.set(it.x, it.py, it.z); scene.add(D); hitDetach(it, D);
   if (it.k === 'tree') { TREES.lodOn = false; const st = new THREE.Mesh(HIT.stumpG || (HIT.stumpG = new THREE.CylinderGeometry(0.85, 1, 1, 7).translate(0, 0.5, 0)), HIT.stumpM || (HIT.stumpM = new THREE.MeshLambertMaterial({ color: 0x6a5a48 })));
     st.scale.set(it.r * 1.05, 0.45, it.r * 1.05); st.position.set(it.x, it.y0 - 0.05, it.z); scene.add(st); it.stump = st; }
+  if (it.tall) hitWireCut(it);
   const h = Math.max(0.6, it.y1 - it.py), lat = 1.2 + Math.random() * 1.5;
   const d = { it, D, mode: K.mode, t: 0, dx, dz, h };
-  if (K.mode === 'tip') { d.ax = new THREE.Vector3(dz, 0, -dx); d.th = 0; d.w = Math.min(4, sp * 0.9 / Math.max(1.2, h * 0.6)) + 0.3; d.lie = it.lie || 1.5; d.vs = sp * (it.k === 'tree' ? 0.12 : 0.35); d.landed = false; }
+  if (K.mode === 'tip') { d.ax = new THREE.Vector3(dz, 0, -dx); d.th = 0; d.w = Math.min(4, sp * 0.9 / Math.max(1.2, h * 0.6)) + 0.3; d.lie = it.lie || 1.5; d.vs = sp * (it.k === 'tree' || h > 5 ? 0.12 : 0.35); d.landed = false; }
   else { d.vx = dx * sp * 0.9 - nx * lat; d.vz = dz * sp * 0.9 - nz * lat; d.vy = 1.5 + sp * 0.15 + Math.random() * 1.5; d.wx = (Math.random() - 0.5) * 10; d.wy = (Math.random() - 0.5) * 6; d.wz = (Math.random() - 0.5) * 10; d.bounce = 0; }
   HIT.deb.push(d);
   S.v *= 1 - K.slow * Math.min(1, 6 / Math.max(1, sp) + 0.5);
@@ -13041,6 +13125,91 @@ function hitKnockArm(A) {
   HIT.deb.push({ it: A, D: o, mode: 'fly', t: 0, vx: fx * (sp * 0.8 + 1), vz: fz * (sp * 0.8 + 1), vy: 2 + sp * 0.1, wx: (Math.random() - 0.5) * 4, wy: (Math.random() - 0.5) * 8, wz: (Math.random() - 0.5) * 4, bounce: 0, h: 0.1, arm: true });
   S.v *= 0.99; if (typeof sndOk === 'function' && sndOk() && SND.knock) SND.knock('arm', sp, A.x, A.z);
 }
+/* ---- 止めてある車: 動き出す (破片の入れ物 D を車の位置・向きに置き、毎フレーム d の位置・向き・傾きを写す) ---- */
+function hitCarStart(it) {
+  it.down = true; it.downT = 0; HIT.down.push(it); HIT.knocks++;
+  const D = new THREE.Group(); D.rotation.order = 'YXZ'; D.position.set(it.x, it.py, it.z); D.rotation.y = it.yaw; scene.add(D); hitDetach(it, D);
+  const d = { it, D, mode: 'car', car: true, t: 0, x: it.x, z: it.z, h: it.yaw, vx: 0, vz: 0, w: 0, vy: 0, lift: 0, roll: 0, wr: 0, yoff: it.py - groundAt(it.x, it.z), m: it.m, hl: it.hz, hw: it.hx, H: it.y1 - it.y0, rest: false };
+  HIT.deb.push(d); HIT.cars.push(d); return d;
+}
+/* バスと車がぶつかる: 重さで分けて押し離し、近づく速さに衝突の力 (はね返り 0.2) を掛ける。ぶつかった点が車の中心からずれていれば回る */
+function hitCarPush(d, o, fx, fz, rx, rz) {
+  const MB = HIT.MB, m = d.m, nx = o.nx, nz = o.nz, pen = Math.min(o.pen, 1.2), sb = m / (MB + m), sc = MB / (MB + m);
+  S.x += nx * pen * sb; S.z += nz * pen * sb; d.x -= nx * pen * sc; d.z -= nz * pen * sc;
+  const vrel = (fx * S.v - d.vx) * -nx + (fz * S.v - d.vz) * -nz; if (vrel <= 0.02) return;
+  const j = 1.2 * vrel / (1 / MB + 1 / m), dv = j / m; d.vx -= nx * dv; d.vz -= nz * dv; S.v += (nx * fx + nz * fz) * j / MB; d.rest = false;
+  const ex = d.x - S.x, ez = d.z - S.z, pr = Math.max(-HIT_BW, Math.min(HIT_BW, ex * rx + ez * rz)), pf = Math.max(-HALF, Math.min(HALF, ex * fx + ez * fz));
+  const cx = S.x + rx * pr + fx * pf - d.x, cz = S.z + rz * pr + fz * pf - d.z, I = m * (d.hl * d.hl + d.hw * d.hw) / 3;
+  d.w += (cz * -nx * j - cx * -nz * j) / I * 0.8;
+  if (dv > 6) { d.vy = Math.max(d.vy, (dv - 6) * 0.32); if (dv > 9) d.wr += (Math.random() < 0.5 ? -1 : 1) * (dv - 9) * 0.55; }   /* 速いとはね上がり、もっと速いと転がる */
+  if (vrel > 1.2) { audio.thud(vrel * 1.3); bump = Math.max(bump, Math.min(0.7, vrel / 20)); S.jolt = Math.max(S.jolt || 0, Math.min(1, vrel / 14)); }
+}
+/* 車どうし (a が b に当たった): 重さで分ける */
+function hitCarCar(a, b, o) {
+  const pen = Math.min(o.pen, 1), ma = a.m, mb = b.m, s = ma + mb; a.x += o.nx * pen * mb / s; a.z += o.nz * pen * mb / s; b.x -= o.nx * pen * ma / s; b.z -= o.nz * pen * ma / s;
+  const vrel = (a.vx - b.vx) * -o.nx + (a.vz - b.vz) * -o.nz; if (vrel <= 0.02) return;
+  const j = 1.3 * vrel / (1 / ma + 1 / mb); a.vx += o.nx * j / ma; a.vz += o.nz * j / ma; b.vx -= o.nx * j / mb; b.vz -= o.nz * j / mb; b.rest = false;
+  b.w += (Math.random() - 0.5) * j / mb * 0.6; if (vrel > 1.5) audio.thud(vrel);
+}
+/* 車を動かす (毎フレーム): 跳ねて落ちる・地面で滑って止まる (タイヤが横に滑るので強い摩擦)・転がったら横か屋根で止まる・建物と止まる物で止まる・ほかの止めてある車を押す */
+const _hRay = new THREE.Raycaster(), _hDir = new THREE.Vector3();
+function hitCarMove(d, dt) {
+  const D = d.D; let sp = Math.hypot(d.vx, d.vz);
+  if (d.rest && d.lift === 0 && sp === 0) return;
+  if (d.lift > 0 || d.vy > 0) { d.vy -= 9.8 * dt; d.lift += d.vy * dt; if (d.lift <= 0) { d.lift = 0; if (d.vy < -2.5) { d.vy *= -0.22; audio.thud(-d.vy * 2); } else d.vy = 0; } }
+  d.roll += d.wr * dt;
+  if (d.lift === 0) { const side = Math.abs(Math.sin(d.roll)) > 0.5 || Math.cos(d.roll) < 0, mu = side ? 5.5 : 7.0;
+    if (sp > 0) { const s2 = Math.max(0, sp - mu * dt); d.vx *= s2 / sp; d.vz *= s2 / sp; sp = s2; }
+    d.w *= Math.max(0, 1 - 4 * dt); if (Math.abs(d.w) < 0.03) d.w = 0;
+    d.wr *= Math.max(0, 1 - 3 * dt); if (Math.abs(d.wr) < 1.2) { const tg = Math.round(d.roll / (Math.PI / 2)) * Math.PI / 2; d.roll += (tg - d.roll) * Math.min(1, 8 * dt); d.wr = 0; } }
+  /* 建物 (colliders): 進む向きに光線 */
+  if (sp > 0.3) { const gy = groundAt(d.x, d.z); _hDir.set(d.vx / sp, 0, d.vz / sp); _hRay.set(_hV.set(d.x, gy + 0.8 + d.lift, d.z), _hDir); _hRay.far = Math.max(d.hl, d.hw) + sp * dt + 0.2;
+    const hit = _hRay.intersectObjects(colliders, false)[0]; if (hit && hit.face) { _hV2.copy(hit.face.normal).transformDirection(hit.object.matrixWorld); _hV2.y = 0; const nl = _hV2.length();
+      if (nl > 0.1) { _hV2.multiplyScalar(1 / nl); const vn = d.vx * _hV2.x + d.vz * _hV2.z; if (vn < 0) { d.vx -= 1.3 * vn * _hV2.x; d.vz -= 1.3 * vn * _hV2.z; d.w += (Math.random() - 0.5) * 0.8; if (-vn > 2) audio.thud(-vn * 1.5); } } } }
+  /* 止まる物・止めてある車 */
+  const ca = Math.cos(d.h), sa = -Math.sin(d.h), C = HIT.C, st = ++HIT.stamp, R = d.hl + 0.5;
+  for (let cx = Math.floor((d.x - R) / C); cx <= Math.floor((d.x + R) / C); cx++) for (let cz = Math.floor((d.z - R) / C); cz <= Math.floor((d.z + R) / C); cz++) { const L = HIT.grid.get(hitKey(cx, cz)); if (!L) continue;
+    for (const it of L) { if (it.q === st || it.down || it === d.it) continue; it.q = st; if (it.y0 > groundAt(d.x, d.z) + d.lift + 1.4) continue;
+      let o; if (it.box) o = hitObb(d.x, d.z, ca, sa, d.hw, d.hl, it.x, it.z, it.ca, it.sa, it.hx, it.hz);
+      else { const ex = it.x - d.x, ez = it.z - d.z, pr = ex * ca + ez * sa, pf = ex * -sa + ez * ca, qr = Math.max(-d.hw, Math.min(d.hw, pr)), qf = Math.max(-d.hl, Math.min(d.hl, pf)), wx = pr - qr, wz = pf - qf, dd = Math.hypot(wx, wz);
+        if (dd >= it.r || dd < 1e-6) continue; const nr = -wx / dd, nf = -wz / dd; o = _hRes; o.nx = nr * ca + nf * -sa; o.nz = nr * sa + nf * ca; o.pen = it.r - dd; }
+      if (!o) continue;
+      if (it.car) { hitCarCar(d, hitCarStart(it), o); continue; }
+      if (it.k && sp > hitK(it).v + 1 && hitK(it).slow < 0.1) continue;   /* 軽い物は車がはねる (倒すのはバスだけ、そのまま通る) */
+      const pen = Math.min(o.pen, 0.6); d.x += o.nx * pen; d.z += o.nz * pen; const vn = d.vx * o.nx + d.vz * o.nz; if (vn < 0) { d.vx -= 1.25 * vn * o.nx; d.vz -= 1.25 * vn * o.nz; d.w += (Math.random() - 0.5) * 0.6; if (-vn > 2) audio.thud(-vn); } } }
+  for (const e of HIT.cars) { if (e === d || Math.abs(e.x - d.x) > 7 || Math.abs(e.z - d.z) > 7) continue; const o = hitObb(d.x, d.z, ca, sa, d.hw, d.hl, e.x, e.z, Math.cos(e.h), -Math.sin(e.h), e.hw, e.hl); if (o) hitCarCar(d, e, o); }
+  d.x += d.vx * dt; d.z += d.vz * dt; d.h += d.w * dt;
+  if (d.lift === 0 && sp < 0.02 && d.w === 0 && d.wr === 0) { d.vx = d.vz = 0; d.rest = true; }
+  const lift = d.hw * Math.abs(Math.sin(d.roll)) + d.H * 0.5 * (1 - Math.cos(d.roll)) * 0.85;   /* 横倒し・逆さのときは車体が地面の上に来るように持ち上げる */
+  D.position.set(d.x, groundAt(d.x, d.z) + d.yoff + d.lift + lift, d.z); D.rotation.set(0, d.h, d.roll);
+}
+/* ---- 電線・架線: 背の高い物が倒れたら、上につながる線 (LineSegments) を、隣の同じ柱までの範囲で隠す ---- */
+function hitWiresInit() {
+  HIT.wires = []; const pw = window.__poleWires && window.__poleWires.geo;
+  scene.traverse(o => { if (!o.isLineSegments || !o.geometry || o.geometry === pw) return; const a = o.geometry.attributes.position; if (!a || a.count > 4e6) return;
+    const e = o.matrixWorld.elements; if (Math.abs(e[12]) + Math.abs(e[13]) + Math.abs(e[14]) > 1e-3 || Math.abs(e[0] - 1) + Math.abs(e[5] - 1) + Math.abs(e[10] - 1) > 1e-3) return;
+    const L = { o, a, grid: new Map() };
+    for (let s = 0; s + 1 < a.count; s += 2) { const k = hitKey(Math.floor((a.getX(s) + a.getX(s + 1)) / 2 / HIT.C), Math.floor((a.getZ(s) + a.getZ(s + 1)) / 2 / HIT.C)); let G2 = L.grid.get(k); if (!G2) L.grid.set(k, G2 = []); G2.push(s); }
+    HIT.wires.push(L); });
+}
+function hitWireCut(it) {
+  if (!HIT.wires.length) return; const C = HIT.C;
+  /* 範囲: 隣の同じ柱 (src が同じ) までの距離 */
+  let Dm = 45; for (let cx = Math.floor((it.x - 60) / C); cx <= Math.floor((it.x + 60) / C); cx++) for (let cz = Math.floor((it.z - 60) / C); cz <= Math.floor((it.z + 60) / C); cz++) { const L = HIT.grid.get(hitKey(cx, cz)); if (L) for (const o of L) if (o !== it && o.src === it.src && o.tall) { const dd = Math.hypot(o.x - it.x, o.z - it.z); if (dd > 1.5) Dm = Math.min(Dm, dd - 1); } }
+  Dm = Math.max(5, Dm); const b = it.bb, yTop = it.py + 3, E = 0.7; it.wsave = [];
+  for (const L of HIT.wires) { const a = L.a, cand = [];
+    for (let cx = Math.floor((it.x - Dm) / C); cx <= Math.floor((it.x + Dm) / C); cx++) for (let cz = Math.floor((it.z - Dm) / C); cz <= Math.floor((it.z + Dm) / C); cz++) { const G2 = L.grid.get(hitKey(cx, cz)); if (G2) for (const s of G2) {
+      if (Math.hypot(a.getX(s) - it.x, a.getZ(s) - it.z) < Dm && Math.hypot(a.getX(s + 1) - it.x, a.getZ(s + 1) - it.z) < Dm && Math.min(a.getY(s), a.getY(s + 1)) > yTop) cand.push(s); } }
+    if (!cand.length) continue;
+    const key = v => Math.round(a.getX(v) * 50) + ',' + Math.round(a.getY(v) * 50) + ',' + Math.round(a.getZ(v) * 50), at = new Map();
+    for (const s of cand) for (const v of [s, s + 1]) { const k = key(v); let l = at.get(k); if (!l) at.set(k, l = []); l.push(s); }
+    const inB = v => { const x = a.getX(v), y = a.getY(v), z = a.getZ(v); return x > b[0] - E && x < b[3] + E && z > b[2] - E && z < b[5] + E && y > yTop && y < b[4] + E; };
+    const seen = new Set(), q = []; for (const s of cand) if (inB(s) || inB(s + 1)) { seen.add(s); q.push(s); }
+    while (q.length) { const s = q.pop(); for (const v of [s, s + 1]) for (const t of at.get(key(v))) if (!seen.has(t)) { seen.add(t); q.push(t); } }
+    if (!seen.size) continue; const segs = [...seen], vals = new Float32Array(segs.length * 6);
+    segs.forEach((s, i) => { for (let c = 0; c < 2; c++) { vals[i * 6 + c * 3] = a.getX(s + c); vals[i * 6 + c * 3 + 1] = a.getY(s + c); vals[i * 6 + c * 3 + 2] = a.getZ(s + c); } a.setXYZ(s + 1, a.getX(s), a.getY(s), a.getZ(s)); });
+    a.needsUpdate = true; it.wsave.push({ a, segs, vals }); }
+}
 /* 元に戻す */
 function hitRestore(it) {
   it.down = false;
@@ -13048,31 +13217,36 @@ function hitRestore(it) {
   else { let k = 0; for (const p of it.parts) { const s = it.saved[k++];
       if (p.im) { p.im.setMatrixAt(p.i, s); p.im.instanceMatrix.needsUpdate = true; }
       else if (p.mesh) { const pos = p.mesh.geometry.attributes.position; pos.array.set(s, p.start * 3); pos.needsUpdate = true; }
+      else if (p.tm) { const g = p.tm.geometry, pos = g.attributes.position, I = g.index; let w = 0; for (const t of p.tris) for (let c = 0; c < 3; c++) { const v = I ? I.getX(t * 3 + c) : t * 3 + c; pos.setXYZ(v, s[w], s[w + 1], s[w + 2]); w += 3; } pos.needsUpdate = true; }
+      else if (p.pt) { const pos = p.pt.geometry.attributes.position; pos.setY(p.i, s); pos.needsUpdate = true; }
       else if (p.obj) { const o = p.obj; s.parent.add(o); o.position.copy(s.pos); o.quaternion.copy(s.q); o.scale.copy(s.s); } }
     if (it.k === 'tree') TREES.lodOn = false; if (it.stump) { scene.remove(it.stump); it.stump = null; } }
-  it.saved = null;
+  if (it.wsave) { for (const W of it.wsave) { W.segs.forEach((s, i) => { for (let c = 0; c < 2; c++) W.a.setXYZ(s + c, W.vals[i * 6 + c * 3], W.vals[i * 6 + c * 3 + 1], W.vals[i * 6 + c * 3 + 2]); }); W.a.needsUpdate = true; } it.wsave = null; }
+  it.saved = null; if (it.car) HIT.cars = HIT.cars.filter(d => d.it !== it);
   for (let j = HIT.deb.length - 1; j >= 0; j--) if (HIT.deb[j].it === it) { const d = HIT.deb[j]; if (!d.arm) { scene.remove(d.D); d.D.traverse(o => { if (o.isInstancedMesh) o.dispose(); else if (o.isMesh && !it.parts.some(p => p.obj === o)) o.geometry.dispose(); }); } HIT.deb.splice(j, 1); }
 }
-function hitReset() { for (const it of HIT.down.splice(0)) hitRestore(it); }
+function hitReset() { for (const it of HIT.down.splice(0)) hitRestore(it); HIT.cars = []; }
 /* ---- 破片を動かす・時間がたったら戻す (毎フレーム) ---- */
 function hitDebris(dt) {
   for (const d of HIT.deb) { d.t += dt; const D = d.D;
+    if (d.car) { hitCarMove(d, Math.min(dt, 0.05)); continue; }
     if (d.mode === 'tip') {   /* 根元を軸に倒れる棒: 角加速度 = 1.5 g / h × sin θ。地面に着いたら少し跳ねて止まる */
       if (!d.landed) { d.w += 1.5 * 9.8 / Math.max(0.8, d.h) * Math.sin(Math.max(0.05, d.th)) * dt; d.th += d.w * dt;
-        if (d.th >= d.lie) { d.th = d.lie; if (d.w > 1.2) { if (typeof sndOk === 'function' && sndOk() && SND.knockLand) SND.knockLand(HIT.KIND[d.it.k].mat, d.w * d.h, D.position.x, D.position.z); d.w *= -0.22; } else { d.w = 0; d.landed = true; } } }
+        if (d.th >= d.lie) { d.th = d.lie; if (d.w > 1.2) { if (typeof sndOk === 'function' && sndOk() && SND.knockLand) SND.knockLand(hitK(d.it).mat, d.w * d.h, D.position.x, D.position.z); d.w *= -0.22; } else { d.w = 0; d.landed = true; } } }
       d.vs = Math.max(0, d.vs - 6 * dt); D.position.x += d.dx * d.vs * dt; D.position.z += d.dz * d.vs * dt;
       D.quaternion.setFromAxisAngle(d.ax, d.th);
     } else if (!d.rest) {   /* 飛ぶ: 回りながら落ちて跳ねる (歩道の柵の破片と同じ) */
       d.vy -= 9.8 * dt; D.position.x += d.vx * dt; D.position.y += d.vy * dt; D.position.z += d.vz * dt; D.rotation.x += d.wx * dt; D.rotation.y += d.wy * dt; D.rotation.z += d.wz * dt;
       const gy = groundAt(D.position.x, D.position.z) + (d.arm ? 0.05 : 0.02);
       if (D.position.y < gy) { D.position.y = gy;
-        if (d.vy < -1.2) { if (d.bounce++ < 2 && typeof sndOk === 'function' && sndOk() && SND.knockLand) SND.knockLand(d.arm ? 'arm' : HIT.KIND[d.it.k].mat, -d.vy, D.position.x, D.position.z); d.vy *= -0.3; d.vx *= 0.55; d.vz *= 0.55; d.wx *= 0.5; d.wy *= 0.5; d.wz *= 0.5; }
+        if (d.vy < -1.2) { if (d.bounce++ < 2 && typeof sndOk === 'function' && sndOk() && SND.knockLand) SND.knockLand(d.arm ? 'arm' : hitK(d.it).mat, -d.vy, D.position.x, D.position.z); d.vy *= -0.3; d.vx *= 0.55; d.vz *= 0.55; d.wx *= 0.5; d.wy *= 0.5; d.wz *= 0.5; }
         else { d.vy = 0; d.vx *= 0.8; d.vz *= 0.8; d.wx *= 0.7; d.wy *= 0.7; d.wz *= 0.7; if (Math.hypot(d.vx, d.vz) < 0.05) d.rest = true; } } }
   }
-  /* 戻す: LIFE 秒たって、バスからもカメラからも 40m 以上離れているとき (目の前で生えてこないように)。踏切の遮断かんは閉まっていない時に */
+  /* 戻す: LIFE 秒たって、バスからもカメラからも 40m 以上離れているとき (目の前で生えてこないように)。動いた車は今いる場所でも調べる */
   const cam = camera.position;
   for (let i = HIT.down.length - 1; i >= 0; i--) { const it = HIT.down[i]; it.downT += dt; if (it.downT < HIT.LIFE) continue;
     if (Math.hypot(it.x - S.x, it.z - S.z) < 40 || Math.hypot(it.x - cam.x, it.z - cam.z) < 40) continue;
+    if (it.car) { const d = HIT.cars.find(e => e.it === it); if (d && (Math.hypot(d.x - S.x, d.z - S.z) < 40 || Math.hypot(d.x - cam.x, d.z - cam.z) < 40)) continue; }
     HIT.down.splice(i, 1); hitRestore(it); }
 }
 /* ---- 草を寝かせる: 草のシェーダーに通り道の点 (x, z, 時刻, 向き) を渡す ---- */
@@ -13103,11 +13277,18 @@ function hitGrassTrail() {
 }
 /* ---- 読み込み後に街を調べて登録する ---- */
 function hitSkipSet() {
-  const skip = new Set(colliders), add = o => { if (o) o.traverse(c => skip.add(c)); };
+  const skip = new Set(colliders), add = o => { if (o && o.traverse) o.traverse(c => skip.add(c)); };
   if (typeof car !== 'undefined') add(car); if (FENCE.im) skip.add(FENCE.im); if (GRASS.mesh) skip.add(GRASS.mesh);
   for (const [los, hi] of TREES.parts) { for (const l of los) skip.add(l); skip.add(hi); }
   for (const X of xings) for (const a of X.arms || []) { let r = a; while (r.parent && r.parent !== scene) r = r.parent; add(r); }
   scene.traverse(o => { if (o.userData && o.userData.hit) add(o); });
+  /* 動く物 (たまたま2回とも止まっていても入れない): 一般車・電車・路面電車・人・止めてある車 (車は hitCars で別に) */
+  if (typeof traffic !== 'undefined') for (const c of traffic) add(c.obj);
+  if (typeof trams !== 'undefined') for (const t of trams) add(t.obj);
+  if (typeof trainCars !== 'undefined') for (const c of trainCars) add(c.obj);
+  if (typeof LOT_TILES !== 'undefined') for (const T of LOT_TILES) add(T.o);
+  if (typeof LOT_BOX !== 'undefined') for (const im of LOT_BOX) add(im);
+  if (typeof pedBody !== 'undefined') add(pedBody); if (typeof pedHead !== 'undefined') add(pedHead); if (typeof pedParts !== 'undefined' && pedParts) for (const v of Object.values(pedParts)) add(v);
   return skip;
 }
 function hitSig(o) { const e = o.matrixWorld.elements; let s = e[12] * 1.3 + e[13] * 0.7 + e[14] * 1.1 + e[0] + e[2] + e[5];
@@ -13121,10 +13302,42 @@ function hitCands() {   /* 調べる Mesh: 見えていて、目印・建物・�
   walk(scene); return out;
 }
 function hitScanA() { scene.updateMatrixWorld(true); const m = new Map(); for (const o of hitCands()) m.set(o, hitSig(o)); HIT.snapA = m; }
-function hitScanB() {
+/* 自動のなぎ倒せる物の重さ: 高さ h、部品の箱の体積の合計 vol */
+function hitAutoK(h, vol) {
+  if (h > 4.5) return h > 8.5 || vol > 1.2 ? { mat: 'concrete', v: 1.9, slow: 0.2, mode: 'tip' } : { mat: 'metal', v: 1.5, slow: 0.13, mode: 'tip' };   /* 架線柱・高い柱 / 街灯・信号の柱 (鉄): 重いのでバスがかなり減速 */
+  if (h > 1.3) return vol > 0.5 ? { mat: 'metal', v: 1.5, slow: 0.12, mode: 'tip' } : { mat: 'metal', v: 0.9, slow: 0.04, mode: 'tip' };   /* 自販機・電話ボックス / 標識・案内板・ポスト */
+  return vol > 0.35 ? { mat: 'plastic', v: 1.0, slow: 0.06, mode: 'fly' } : { mat: 'metal', v: 0.5, slow: 0.025, mode: 'fly' };   /* ベンチ・大きい鉢 / 車止め・ポール */
+}
+/* まとめた Mesh を、頂点の位置 (1cm) でつながった三角形のかたまりに分ける。立った三角形 (法線が横向き) どうしをつなぎ、平らな三角形はつながる先に入れる */
+function* hitDecomp(o, src, add, huge) {
+  const g = o.geometry, pos = g.attributes.position, I = g.index, nv = pos.count, nT = ((I ? I.count : nv) / 3) | 0, W = o.matrixWorld; if (!nT) return;
+  const ex = []; for (const e of HIT.merged.values()) if (HIT.KIND[e.k]) for (const p of e.parts) if (p.mesh === o) ex.push(p.start, p.start + p.count);   /* 目印のある物の三角形は外す */
+  const wp = new Float32Array(nv * 3); let x0 = 1e9, y0 = 1e9, z0 = 1e9;
+  for (let v = 0; v < nv; v++) { _hV.fromBufferAttribute(pos, v).applyMatrix4(W); wp[v * 3] = _hV.x; wp[v * 3 + 1] = _hV.y; wp[v * 3 + 2] = _hV.z; if (_hV.x < x0) x0 = _hV.x; if (_hV.y < y0) y0 = _hV.y; if (_hV.z < z0) z0 = _hV.z; if ((v & 32767) === 32767) yield; }
+  const id = new Int32Array(nv).fill(-1), M = new Map(), par = []; let nW = 0;
+  const wid = (v, make) => { if (id[v] >= 0) return id[v]; const k = (Math.round((wp[v * 3] - x0) * 100) * 262144 + Math.round((wp[v * 3 + 2] - z0) * 100)) * 65536 + Math.round((wp[v * 3 + 1] - y0) * 100);
+    let w = M.get(k); if (w === undefined) { if (!make) return -1; w = nW++; M.set(k, w); par.push(w); } id[v] = w; return w; };
+  const find = a => { while (par[a] !== a) { par[a] = par[par[a]]; a = par[a]; } return a; };
+  const tc = new Int32Array(nT).fill(-1), stand = new Uint8Array(nT), ha = new Float32Array(nT), vi = t => I ? I.getX(t) : t;
+  for (let t = 0; t < nT; t++) { const a = vi(t * 3), b = vi(t * 3 + 1), c = vi(t * 3 + 2);
+    if (ex.length) { let inEx = false; for (let q = 0; q < ex.length; q += 2) if (a >= ex[q] && a < ex[q + 1]) { inEx = true; break; } if (inEx) { tc[t] = -2; continue; } }
+    const ux = wp[b * 3] - wp[a * 3], uy = wp[b * 3 + 1] - wp[a * 3 + 1], uz = wp[b * 3 + 2] - wp[a * 3 + 2], qx = wp[c * 3] - wp[a * 3], qy = wp[c * 3 + 1] - wp[a * 3 + 1], qz = wp[c * 3 + 2] - wp[a * 3 + 2];
+    const nx = uy * qz - uz * qy, ny = uz * qx - ux * qz, nz = ux * qy - uy * qx, nl = Math.hypot(nx, ny, nz); ha[t] = Math.abs(ny) / 2; if (nl < 1e-10 || Math.abs(ny / nl) > 0.6) continue;
+    stand[t] = 1; const A = find(wid(a, 1)), B = find(wid(b, 1)), Cc = find(wid(c, 1)); par[B] = A; par[find(Cc)] = A; if ((t & 16383) === 16383) yield; }
+  for (let t = 0; t < nT; t++) { if (tc[t] === -2) { tc[t] = -1; continue; } const a = vi(t * 3);
+    if (stand[t]) tc[t] = find(id[a]); else { let w = wid(a, 0); if (w < 0) w = wid(vi(t * 3 + 1), 0); if (w < 0) w = wid(vi(t * 3 + 2), 0); tc[t] = w < 0 ? -1 : find(w); } }
+  const cnt = new Int32Array(nW); for (let t = 0; t < nT; t++) if (tc[t] >= 0) cnt[tc[t]]++;
+  const off = new Int32Array(nW + 1); for (let w = 0; w < nW; w++) off[w + 1] = off[w] + cnt[w]; const all = new Uint32Array(off[nW]), fill = off.slice(0, nW), bb = new Float32Array(nW * 6), har = new Float32Array(nW);
+  for (let w = 0; w < nW; w++) { bb[w * 6] = bb[w * 6 + 1] = bb[w * 6 + 2] = 1e9; bb[w * 6 + 3] = bb[w * 6 + 4] = bb[w * 6 + 5] = -1e9; }
+  for (let t = 0; t < nT; t++) { const w = tc[t]; if (w < 0) continue; all[fill[w]++] = t; har[w] += ha[t]; for (let c = 0; c < 3; c++) { const v = vi(t * 3 + c); for (let e = 0; e < 3; e++) { const x = wp[v * 3 + e]; if (x < bb[w * 6 + e]) bb[w * 6 + e] = x; if (x > bb[w * 6 + 3 + e]) bb[w * 6 + 3 + e] = x; } } }
+  for (let w = 0; w < nW; w++) if (cnt[w]) add({ tm: o, tris: all.subarray(off[w], off[w + 1]), src, huge }, bb[w * 6], bb[w * 6 + 1], bb[w * 6 + 2], bb[w * 6 + 3], bb[w * 6 + 4], bb[w * 6 + 5], har[w] < 0.15 * (bb[w * 6 + 3] - bb[w * 6]) * (bb[w * 6 + 5] - bb[w * 6 + 2]));   /* 平らな面が少ない = 細長い (梁・腕・柵) */
+  yield;
+}
+/* 調べる本体 (generator: hitUpdate が 1フレーム 10ms ずつ進める) */
+function* hitScanGen() {
   const t0 = performance.now(); scene.updateMatrixWorld(true);
-  const box = new THREE.Box3(), cs = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
-  let nObj = 0, nInst = 0, nCell = 0, nSolid = 0; const cells = new Map(), CS = 0.5;
+  const box = new THREE.Box3();
+  let nObj = 0, nInst = 0, nCell = 0, nSolid = 0, nAuto = 0; const cells = new Map(), CS = 0.5, P = [];
   let src = '';
   const solid = (W, bb) => {   /* W = 世界の行列、bb = geometry の箱 → 足元の形と高さで登録 */
     const e = W.elements, sx = Math.hypot(e[0], e[1], e[2]), sy = Math.hypot(e[4], e[5], e[6]), sz = Math.hypot(e[8], e[9], e[10]); if (sx < 1e-4 || sy < 1e-4 || sz < 1e-4) return;
@@ -13137,27 +13350,85 @@ function hitScanB() {
     if (hx < 0.7 && hz < 0.7 && Math.abs(hx - hz) < 0.45) hitAdd({ x, z, r: Math.max(0.1, hx, hz), y0, y1, src });
     else hitAdd({ x, z, box: true, hx: Math.max(0.06, hx), hz: Math.max(0.06, hz), ca, sa, y0, y1, src });
     nSolid++; };
-  for (const o of hitCands()) { const a = HIT.snapA.get(o); if (a === undefined || Math.abs(a - hitSig(o)) > 1e-3) continue;   /* 2回とも同じ = 動かない物だけ */
-    const g = o.geometry; if (!g || !g.attributes.position) continue; { const m0 = Array.isArray(o.material) ? o.material[0] : o.material; src = (o.name || g.type) + (m0 && m0.color ? '#' + m0.color.getHexString() : '') + (o.isInstancedMesh ? ' im' + o.count : ''); } if (!g.boundingBox) g.computeBoundingBox(); const bb = g.boundingBox; if (bb.isEmpty()) continue;
-    if (o.isInstancedMesh) { for (let i = 0; i < o.count; i++) { o.getMatrixAt(i, _hM); solid(_hM.premultiply(o.matrixWorld), bb); nInst++; } continue; }
-    box.copy(bb).applyMatrix4(o.matrixWorld); nObj++;
-    if (box.max.x - box.min.x < 25 && box.max.z - box.min.z < 25) { solid(o.matrixWorld, bb); continue; }
-    if (box.max.x - box.min.x > 1500 || box.max.z - box.min.z > 1500) continue;   /* 地形・道路の面など */
-    /* まとめた大きい Mesh: 立った三角形を 0.5m 升目に塗る (升目ごとに一番低い・高い点) */
-    const ex = []; for (const e of HIT.merged.values()) if (HIT.KIND[e.k]) for (const p of e.parts) if (p.mesh === o) ex.push(p.start, p.start + p.count);   /* なぎ倒せる物の三角形は塗らない */
-    const pos = g.attributes.position, idx = g.index, n = idx ? idx.count : pos.count, W = o.matrixWorld, A = new THREE.Vector3(), B = new THREE.Vector3(), Cc = new THREE.Vector3(), N = new THREE.Vector3(), P = new THREE.Vector3();
-    for (let t = 0; t < n; t += 3) { const ia = idx ? idx.getX(t) : t, ib = idx ? idx.getX(t + 1) : t + 1, ic = idx ? idx.getX(t + 2) : t + 2;
-      if (ex.length) { let inEx = false; for (let q = 0; q < ex.length; q += 2) if (ia >= ex[q] && ia < ex[q + 1]) { inEx = true; break; } if (inEx) continue; }
+  /* 立った三角形を 0.5m 升目に塗る (升目ごとに一番低い・高い点) */
+  const A = new THREE.Vector3(), B = new THREE.Vector3(), Cc = new THREE.Vector3(), N = new THREE.Vector3(), Pp = new THREE.Vector3();
+  const paint = (o, tris) => { const g = o.geometry, pos = g.attributes.position, idx = g.index, W = o.matrixWorld;
+    for (const t of tris) { const ia = idx ? idx.getX(t * 3) : t * 3, ib = idx ? idx.getX(t * 3 + 1) : t * 3 + 1, ic = idx ? idx.getX(t * 3 + 2) : t * 3 + 2;
       A.fromBufferAttribute(pos, ia).applyMatrix4(W); B.fromBufferAttribute(pos, ib).applyMatrix4(W); Cc.fromBufferAttribute(pos, ic).applyMatrix4(W);
       N.subVectors(B, A).cross(_hV2.subVectors(Cc, A)); const nl = N.length(); if (nl < 1e-8 || Math.abs(N.y / nl) > 0.6) continue;
       const ty1 = Math.max(A.y, B.y, Cc.y); if (ty1 - Math.min(A.y, B.y, Cc.y) < 0.15) continue;
       const L1 = A.distanceTo(B), L2 = A.distanceTo(Cc), m1 = Math.min(60, Math.ceil(L1 / 0.35)), m2 = Math.min(60, Math.ceil(L2 / 0.35));
       for (let u = 0; u <= m1; u++) for (let v = 0; v <= m2 - u * m2 / m1 + 1e-6; v++) { const fu = u / m1, fv = v / m2; if (fu + fv > 1.0001) continue;
-        P.copy(A).addScaledVector(_hV.subVectors(B, A), fu).addScaledVector(_hV2.subVectors(Cc, A), fv);
-        const k = Math.floor(P.x / CS) * 100003 + Math.floor(P.z / CS); let c = cells.get(k); if (!c) cells.set(k, c = [P.x, P.z, P.y, P.y, src]); else { if (P.y < c[2]) c[2] = P.y; if (P.y > c[3]) c[3] = P.y; } } } }
+        Pp.copy(A).addScaledVector(_hV.subVectors(B, A), fu).addScaledVector(_hV2.subVectors(Cc, A), fv);
+        const k = Math.floor(Pp.x / CS) * 100003 + Math.floor(Pp.z / CS); let c = cells.get(k); if (!c) cells.set(k, c = [Pp.x, Pp.z, Pp.y, Pp.y, src]); else { if (Pp.y < c[2]) c[2] = Pp.y; if (Pp.y > c[3]) c[3] = Pp.y; } } } };
+  /* 部品を集める (地面から 0.6m 未満の低い物と、16m より上の物は入れない) */
+  const add = (ref, x0, y0, z0, x1, y1, z1, lin) => { const g = groundAt((x0 + x1) / 2, (z0 + z1) / 2); if (y1 < g + 0.6 || y0 > g + 16) return; P.push({ ref, a: [x0, y0, z0, x1, y1, z1], g, lin }); };
+  const linOf = (W, bb) => { const e = W.elements, d = [Math.hypot(e[0], e[1], e[2]) * (bb.max.x - bb.min.x), Math.hypot(e[4], e[5], e[6]) * (bb.max.y - bb.min.y), Math.hypot(e[8], e[9], e[10]) * (bb.max.z - bb.min.z)].sort((a, b) => a - b); return d[1] < 0.8; };   /* 細長い部品 (腕・梁・柱) */
+  const bbOf = o => { const g = o.geometry; if (!g.boundingBox) g.computeBoundingBox(); return g.boundingBox; };
+  for (const o of hitCands()) { const a = HIT.snapA.get(o); if (a === undefined || Math.abs(a - hitSig(o)) > 1e-3) continue;   /* 2回とも同じ = 動かない物だけ */
+    const g = o.geometry; if (!g || !g.attributes.position) continue; { const m0 = Array.isArray(o.material) ? o.material[0] : o.material; src = (o.name || g.type) + (m0 && m0.color ? '#' + m0.color.getHexString() : '') + (o.isInstancedMesh ? ' im' + o.count : ''); }
+    const bb = bbOf(o); if (bb.isEmpty()) continue;
+    if (o.isInstancedMesh) { for (let i = 0; i < o.count; i++) { o.getMatrixAt(i, _hM); const e = _hM.elements; if (Math.abs(e[0]) + Math.abs(e[1]) + Math.abs(e[2]) < 1e-5) continue; _hM.premultiply(o.matrixWorld); box.copy(bb).applyMatrix4(_hM);
+        add({ im: o, i, src }, box.min.x, box.min.y, box.min.z, box.max.x, box.max.y, box.max.z, linOf(_hM, bb)); nInst++; if ((i & 8191) === 8191) yield; } yield; continue; }
+    box.copy(bb).applyMatrix4(o.matrixWorld); nObj++; const dx = box.max.x - box.min.x, dz = box.max.z - box.min.z;
+    if (dx > 8000 || dz > 8000) continue;   /* 地面・空・遠い海 (街じゅうにまとめた信号・柵などは中を調べる) */
+    if (dx < 3 && dz < 3 && box.max.y - box.min.y < 16) { add({ obj: o, src }, box.min.x, box.min.y, box.min.z, box.max.x, box.max.y, box.max.z, linOf(o.matrixWorld, bb)); continue; }
+    yield* hitDecomp(o, src, add, dx > 1500 || dz > 1500); }
+  /* 街灯の夜のにじみ (Points) は灯具といっしょに */
+  if (typeof lampHalos !== 'undefined' && lampHalos) { const a = lampHalos.geometry.attributes.position; for (let i = 0; i < a.count; i++) { const x = a.getX(i), y = a.getY(i), z = a.getZ(i); add({ pt: lampHalos, i, src: 'halo' }, x - 0.05, y - 0.05, z - 0.05, x + 0.05, y + 0.05, z + 0.05); } }
+  yield;
+  /* 部品の箱が触れ合うものを1つにまとめる (2m 升目)。地面に着いた部品 (下端が地面 +1.2m 未満) どうしはつなぎ、高い所の部品 (腕・灯器・架線の腕) は、
+     触れ合いをたどって一番近い足元の物に付ける (道を渡る腕で両側の柱が1つにならないように)。
+     大きい部品 (12m 超・16m 超) は入れない: 高い所にある大きい物 (屋根・高架・歩道橋) は支えにして、それに触れる物は倒さない */
+  const n = P.length, par = new Int32Array(n), gr = new Uint8Array(n), adj = new Array(n), CG = 2, hg = new Map(), anc = new Map(), Ee = 0.03;
+  const wd = new Uint8Array(n); for (let i = 0; i < n; i++) { const a = P[i].a; par[i] = i; gr[i] = a[1] < P[i].g + 1.2 ? 1 : 0; wd[i] = gr[i] && (a[3] - a[0] > 2.8 || a[5] - a[2] > 2.8) ? 1 : 0; }   /* wd: 足元の広い部品 (塀・植え込み・上屋の壁): 柱とつなげず、触れる高い部品は支えられているとみなす */ const find = a => { while (par[a] !== a) { par[a] = par[par[a]]; a = par[a]; } return a; };
+  const cellsOf = (a, f) => { for (let cx = Math.floor(a[0] / CG); cx <= Math.floor(a[3] / CG); cx++) for (let cz = Math.floor(a[2] / CG); cz <= Math.floor(a[5] / CG); cz++) f(hitKey(cx, cz)); };
+  for (let i = 0; i < n; i++) { const p = P[i], a = p.a;
+    if (!p.lin && (a[3] - a[0] > 12 || a[5] - a[2] > 12) || a[4] - a[1] > 16) { p.big = 1; if (a[1] > p.g + 1.5) cellsOf(a, k => { let L = anc.get(k); if (!L) anc.set(k, L = []); L.push(i); }); continue; }
+    cellsOf(a, k => { let L = hg.get(k); if (!L) hg.set(k, L = []); for (const j of L) { const b = P[j].a; if (a[0] <= b[3] + Ee && b[0] <= a[3] + Ee && a[1] <= b[4] + Ee && b[1] <= a[4] + Ee && a[2] <= b[5] + Ee && b[2] <= a[5] + Ee) {
+      if (gr[i] && gr[j]) { if (!wd[i] && !wd[j]) { const ra = find(i), rb = find(j); if (ra !== rb) par[rb] = ra; } } else if (wd[i] || wd[j]) P[wd[i] ? j : i].held = 1; else { (adj[i] || (adj[i] = [])).push(j); (adj[j] || (adj[j] = [])).push(i); } } } L.push(i); });
+    if ((i & 8191) === 8191) yield; }
+  yield;
+  const own = new Int32Array(n).fill(-1), q = []; for (let i = 0; i < n; i++) if (gr[i] && !P[i].big) { own[i] = find(i); q.push(i); }
+  for (let h = 0; h < q.length; h++) { const i = q[h], L = adj[i]; if (L) for (const j of L) if (!gr[j] && own[j] < 0 && !P[j].big) { own[j] = own[i]; q.push(j); } }
+  const groups = new Map(); for (let i = 0; i < n; i++) { if (P[i].big) continue; const r = own[i] >= 0 ? own[i] : -1 - i; let L = groups.get(r); if (!L) groups.set(r, L = []); L.push(i); }
+  const pieceSolid = p => { const r = p.ref; src = r.src;
+    if (r.im) { r.im.getMatrixAt(r.i, _hM); solid(_hM.premultiply(r.im.matrixWorld), bbOf(r.im)); }
+    else if (r.obj) solid(r.obj.matrixWorld, bbOf(r.obj));
+    else if (r.tm && !r.huge) paint(r.tm, r.tris); };   /* 街じゅうにまとめた Mesh (1500m 超: 信号・縁石など) からは倒せる物だけ取り、止まる物は増やさない (縁石の縦の面が壁になる所がある) */
+  /* まとまり L を調べて、倒せるなら登録 (true)。倒せない理由は HIT.rej (調べもの用) */
+  const tryKnock = (L, note) => {
+    let x0 = 1e9, y0 = 1e9, z0 = 1e9, x1 = -1e9, y1 = -1e9, z1 = -1e9, bx0 = 1e9, bz0 = 1e9, bx1 = -1e9, bz1 = -1e9, by0 = 1e9, vol = 0, base = null, bh = -1, anchored = false;
+    for (const i of L) { const p = P[i], a = p.a; x0 = Math.min(x0, a[0]); y0 = Math.min(y0, a[1]); z0 = Math.min(z0, a[2]); x1 = Math.max(x1, a[3]); y1 = Math.max(y1, a[4]); z1 = Math.max(z1, a[5]);
+      vol += (a[3] - a[0]) * (a[4] - a[1]) * (a[5] - a[2]);
+      if (gr[i]) { bx0 = Math.min(bx0, a[0]); bz0 = Math.min(bz0, a[2]); bx1 = Math.max(bx1, a[3]); bz1 = Math.max(bz1, a[5]); by0 = Math.min(by0, a[1]); if (a[4] - a[1] > bh) { bh = a[4] - a[1]; base = p; } }
+      if (p.held || wd[i]) anchored = true;
+      if (!anchored && anc.size) cellsOf(a, k => { const Q = anc.get(k); if (Q) for (const j of Q) { const b = P[j].a; if (a[0] <= b[3] + 0.15 && b[0] <= a[3] + 0.15 && a[1] <= b[4] + 0.15 && b[1] <= a[4] + 0.15 && a[2] <= b[5] + 0.15 && b[2] <= a[5] + 0.15) anchored = true; } }); }
+    const bhx = (bx1 - bx0) / 2, bhz = (bz1 - bz0) / 2, h = y1 - by0;
+    const why = !base ? 'float' : anchored ? 'anchor' : Math.max(bhx, bhz) > 1.4 ? 'base' : x1 - x0 > 30 || z1 - z0 > 30 ? 'wide' : h > 15 ? 'high' : h <= 0.6 ? 'low' : L.length > 400 ? 'many' : '';
+    if (why) { if (base && note) { const k = base.ref.src + ' ' + why + (note === 2 ? ' (柱だけ)' : ''); HIT.rej[k] = (HIT.rej[k] || 0) + 1; } return why; }
+    const K = hitAutoK(h, vol), x = (bx0 + bx1) / 2, z = (bz0 + bz1) / 2, long = Math.max(bhx, bhz) > 1.6 * Math.min(bhx, bhz) && Math.max(bhx, bhz) > 0.35;
+    const it = { k: 'auto', K, x, z, y0: by0, y1, py: by0, parts: L.map(i => P[i].ref), lie: Math.PI / 2 - 0.06, src: base.ref.src, tall: h > 5, bb: [x0, y0, z0, x1, y1, z1] };
+    if (long) { it.box = true; it.hx = bhx + 0.02; it.hz = bhz + 0.02; it.ca = 1; it.sa = 0; } else it.r = Math.max(0.12, Math.max(bhx, bhz) + 0.02);
+    hitAdd(it); nAuto++; return '';
+  };
+  let gi = 0;
+  for (const L of groups.values()) {
+    const why = tryKnock(L, true);
+    if (why === 'base' || why === 'wide') {   /* 柵・植え込みなどとつながった柱 (街灯・架線柱): 細く高い柱だけを、上の腕・灯器ごと取り出す */
+      const inL = new Set(L), taken = new Set();
+      for (const i of L) { const a = P[i].a; if (!gr[i] || taken.has(i) || a[4] - a[1] < 3.5 || a[3] - a[0] > 0.7 || a[5] - a[2] > 0.7) continue;
+        const sub = [i], dep = [0], seen = new Set([i]), cx = (a[0] + a[3]) / 2, cz = (a[2] + a[5]) / 2;   /* 腕・灯器: 3段まで、柱から 14m 以内 */
+        for (let h2 = 0; h2 < sub.length; h2++) { const Q = adj[sub[h2]]; if (Q && dep[h2] < 3) for (const j of Q) { const b = P[j].a; if (!gr[j] && inL.has(j) && !taken.has(j) && !seen.has(j) && Math.hypot((b[0] + b[3]) / 2 - cx, (b[2] + b[5]) / 2 - cz) < 14) { seen.add(j); sub.push(j); dep.push(dep[h2] + 1); } } }
+        if (!tryKnock(sub, 2)) for (const j of sub) taken.add(j); }
+      for (const i of L) if (!taken.has(i)) pieceSolid(P[i]);
+    } else if (why) for (const i of L) pieceSolid(P[i]);
+    if ((++gi & 2047) === 0) yield; }
+  for (const p of P) if (p.big) pieceSolid(p);
+  yield;
   for (const [k, c] of cells) { const cx = Math.floor(c[0] / CS), cz = Math.floor(c[1] / CS), g = groundAt(c[0], c[1]); if (c[2] > g + 1.2 || c[3] < g + 0.6) continue;
     hitAdd({ x: (cx + 0.5) * CS, z: (cz + 0.5) * CS, box: true, hx: CS / 2, hz: CS / 2, ca: 1, sa: 0, y0: c[2], y1: c[3], src: c[4] }); nCell++; }
-  HIT.snapA = null; HIT.scan = { obj: nObj, inst: nInst, solid: nSolid, cells: nCell, ms: Math.round(performance.now() - t0) };
+  HIT.snapA = null; HIT.scan = { obj: nObj, inst: nInst, pieces: n, auto: nAuto, solid: nSolid, cells: nCell, ms: Math.round(performance.now() - t0) };
 }
 /* なぎ倒せる物: 目印の付いたインスタンスを足元の位置でまとめる・merge の範囲・Object3D・踏切 */
 function hitKnockables() {
@@ -13167,17 +13438,31 @@ function hitKnockables() {
         const key = k + Math.round(_hV.x * 4) + ',' + Math.round(_hV.z * 4); let G2 = groups.get(key); if (!G2) groups.set(key, G2 = { k, x: _hV.x, z: _hV.z, py: _hV.y, parts: [], bb: new THREE.Box3() });
         G2.parts.push({ im: o, i }); if (!o.geometry.boundingBox) o.geometry.computeBoundingBox(); G2.bb.union(o.geometry.boundingBox.clone().applyMatrix4(_hM)); G2.py = Math.min(G2.py, _hV.y); } }
     else { const bb = new THREE.Box3().setFromObject(o); if (bb.isEmpty()) return; o.getWorldPosition(_hV); groups.set('o' + o.id, { k, x: _hV.x, z: _hV.z, py: bb.min.y, parts: [{ obj: o }], bb }); } });
-  for (const e of HIT.merged.values()) { if (!HIT.KIND[e.k]) continue; const bb = new THREE.Box3(); for (const p of e.parts) { const a = p.mesh.geometry.attributes.position; for (let q = p.start; q < p.start + p.count; q++) bb.expandByPoint(_hV.fromBufferAttribute(a, q)); }
+  for (const e of HIT.merged.values()) { if (!HIT.KIND[e.k]) continue; const bb = new THREE.Box3(); for (const p of e.parts) { const a = p.mesh.geometry.attributes.position; for (let q = p.start; q < p.start + p.count; q++) bb.expandByPoint(_hV.fromBufferAttribute(a, q).applyMatrix4(p.mesh.matrixWorld)); }
     if (bb.isEmpty()) continue; groups.set('m' + n++, { k: e.k, x: (bb.min.x + bb.max.x) / 2, z: (bb.min.z + bb.max.z) / 2, py: bb.min.y, parts: e.parts.slice(), bb }); }
   for (const G2 of groups.values()) { const bb = G2.bb, hx = (bb.max.x - bb.min.x) / 2, hz = (bb.max.z - bb.min.z) / 2;
     /* 足元の円: 細い物 (標識・のぼり) は柱の太さより少し大きく、横に広い物 (自転車) は外接円の 7割 */
-    const r = G2.k === 'pole' ? 0.26 : G2.k === 'sign' || G2.k === 'mirror' || G2.k === 'nobo' ? 0.22 : Math.max(0.2, Math.min(1.2, Math.hypot(hx, hz) * 0.7));
-    hitAdd({ k: G2.k, x: G2.k === 'pole' || G2.k === 'sign' || G2.k === 'mirror' || G2.k === 'nobo' ? G2.x : (bb.min.x + bb.max.x) / 2, z: G2.k === 'pole' || G2.k === 'sign' || G2.k === 'mirror' || G2.k === 'nobo' ? G2.z : (bb.min.z + bb.max.z) / 2, r, y0: bb.min.y, y1: bb.max.y, py: G2.py, parts: G2.parts, lie: Math.PI / 2 - 0.06 }); }
+    const thin = G2.k === 'pole' || G2.k === 'sign' || G2.k === 'mirror' || G2.k === 'nobo', r = G2.k === 'pole' ? 0.26 : thin ? 0.22 : Math.max(0.2, Math.min(1.2, Math.hypot(hx, hz) * 0.7));
+    hitAdd({ k: G2.k, x: thin ? G2.x : (bb.min.x + bb.max.x) / 2, z: thin ? G2.z : (bb.min.z + bb.max.z) / 2, r, y0: bb.min.y, y1: bb.max.y, py: G2.py, parts: G2.parts, lie: Math.PI / 2 - 0.06 }); }
   /* 踏切: 警報機の柱 (群ごと倒れる) と遮断かん (下りている時に当たると折れて飛ぶ) */
   for (const X of xings) for (const a of X.arms || []) { let r = a; while (r.parent && r.parent !== scene) r = r.parent; if (r === scene || r.userData.hitX) continue; r.userData.hitX = true;
     hitAdd({ k: 'xing', x: r.position.x, z: r.position.z, r: 0.28, y0: r.position.y, y1: r.position.y + 3.6, py: r.position.y, parts: [{ obj: r }], lie: Math.PI / 2 - 0.12 });
     const mesh = a.children.find(c => c.isMesh); if (mesh) { if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox(); const len = mesh.geometry.boundingBox.max.x - mesh.geometry.boundingBox.min.x;
       HIT.arms.push({ isArm: true, k: 'arm', lift: a, mesh, len, x: r.position.x, z: r.position.z, down: false }); } }
+}
+/* 止めてある車 (駐車場): 実車モデルの区画 (LOT_TILES、子の InstancedMesh の同じ番号が1台) か、前の箱の形 (LOT_BOX: 車体・屋根・窓が種類ごと + 最後にタイヤ4本ずつ) */
+function hitCars() {
+  const LP = typeof LOT_PARKED !== 'undefined' && LOT_PARKED; if (!LP || !LP.length) return; const lg = new Map(), box = new THREE.Box3(), list = [];
+  LP.forEach(p => { const k = Math.round(p[1] / 4) + ',' + Math.round(p[3] / 4); let L = lg.get(k); if (!L) lg.set(k, L = []); L.push(p); });
+  const near = (x, z) => { let best = null, bd = 3; for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) { const L = lg.get((Math.round(x / 4) + a) + ',' + (Math.round(z / 4) + b)); if (L) for (const p of L) { const d = Math.hypot(p[1] - x, p[3] - z); if (d < bd) { bd = d; best = p; } } } return best; };
+  const car = parts => { const bb = new THREE.Box3(); for (const q of parts) { const g = q.im.geometry; if (!g.boundingBox) g.computeBoundingBox(); q.im.getMatrixAt(q.i, _hM); _hM.premultiply(q.im.matrixWorld); bb.union(box.copy(g.boundingBox).applyMatrix4(_hM)); } list.push({ parts, bb }); };
+  if (LOT_TILES.length) for (const T of LOT_TILES) { T.o.updateMatrixWorld(true); const ims = T.o.children.filter(c => c.isInstancedMesh); if (!ims.length) continue; for (let j = 0; j < ims[0].count; j++) car(ims.map(im => ({ im, i: j }))); }
+  else { const wh = LOT_BOX[LOT_BOX.length - 1]; let c = 0; for (let q = 0; q + 3 < LOT_BOX.length; q += 3) { const tri = LOT_BOX.slice(q, q + 3); for (let j = 0; j < tri[0].count; j++) { car(tri.map(im => ({ im, i: j })).concat([0, 1, 2, 3].map(w => ({ im: wh, i: c * 4 + w })))); c++; } } }
+  let n = 0;
+  for (const c of list) { if (c.bb.isEmpty()) continue; const cx = (c.bb.min.x + c.bb.max.x) / 2, cz = (c.bb.min.z + c.bb.max.z) / 2, p = near(cx, cz); if (!p) continue;
+    const T = CAR_TYPES[p[0]] || CAR_TYPES.compact, r = p[4];
+    hitAdd({ k: 'car', car: true, x: p[1], z: p[3], box: true, hx: T.W / 2, hz: T.L / 2, ca: Math.cos(r), sa: -Math.sin(r), y0: c.bb.min.y, y1: c.bb.max.y, py: p[2] - 0.02, yaw: r, m: HIT.CARM[p[0]] || 1300, parts: c.parts, src: 'car:' + p[0] }); n++; }
+  HIT.nCars = n;
 }
 /* 木: TREES.parts の遠い形 (タイルごとの InstancedMesh) の1本ずつ。樹冠 [cLos, cHi] と幹 [tLos, tHi] が対で並ぶ */
 function hitTrees() {
@@ -13198,8 +13483,11 @@ function hitUpdate(dt) {
     const now = performance.now();
     if (!HIT.snapA) { hitScanA(); HIT.tA = now; return; }
     if (now - HIT.tA < 2500) return;
-    hitScanB(); hitKnockables(); hitTrees(); hitGrassHook(); HIT.ready = 1; HIT.n = HIT.items.length;
-    console.log('HIT ready ' + JSON.stringify({ items: HIT.items.length, scan: HIT.scan, trees: HIT.trees, arms: HIT.arms.length })); return; }
+    if (!HIT.gen) HIT.gen = hitScanGen();
+    const tE = now + 10; let done = false; while (performance.now() < tE) if (HIT.gen.next().done) { done = true; break; }
+    if (!done) return;
+    HIT.gen = null; hitKnockables(); hitTrees(); hitCars(); hitWiresInit(); hitGrassHook(); HIT.ready = 1; HIT.n = HIT.items.length;
+    console.log('HIT ready ' + JSON.stringify({ items: HIT.items.length, scan: HIT.scan, trees: HIT.trees, arms: HIT.arms.length, cars: HIT.nCars, wires: HIT.wires.length, t: Math.round(performance.now() - HIT.tA - 2500) })); return; }
   if (TREES.parts.length > HIT.treeParts + 1) hitTrees();
   hitDebris(dt); hitGrassTrail();
 }
