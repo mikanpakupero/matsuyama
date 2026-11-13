@@ -1,0 +1,39 @@
+一般車の3Dモデルの出典 (Sketchfab からダウンロード。tools/build_cars.mjs でエンブレム・ロゴ・社名・元のナンバーを消し、軽くして site/cars2.dat.wasm に詰めている)
+
+ライセンス: CC Attribution (CC BY 4.0) は作者名の表示が条件。Sketchfab Free Standard はゲームに組み込んでの利用は可、モデル単体での再配布は不可。
+
+nbox: "2017 Honda N-Box" by ActsOfDoge (ActsOfDoge) - Free Standard - https://sketchfab.com/3d-models/2017-honda-n-box-3621dada3eb040819b135be01439fb4f
+tanto: "2019 Daihatsu Tanto Custom RS" by ActsOfDoge (ActsOfDoge) - Free Standard - https://sketchfab.com/3d-models/2019-daihatsu-tanto-custom-rs-b5990fcd8ca8498899cb22985f935fbb
+wagonr: "2017 Suzuki Wagon R" by ActsOfDoge (ActsOfDoge) - Free Standard - https://sketchfab.com/3d-models/2017-suzuki-wagon-r-45495929766b433b8712079335f406ed
+spacia: "2017 Suzuki Spacia Gear Hybrid XZ Turbo" by ActsOfDoge (ActsOfDoge) - Free Standard - https://sketchfab.com/3d-models/2017-suzuki-spacia-gear-hybrid-xz-turbo-2741f6d546d447b6aca20195f3bf6b1c
+carry: "Suzuki Carry kei truck low poly" by bean(alwayshasbean) (alwayshasbean) - CC Attribution - https://sketchfab.com/3d-models/suzuki-carry-kei-truck-low-poly-6bc99e709e9748da98cc9ac676684510
+prius: "2010 Toyota Prius" by ActsOfDoge (ActsOfDoge) - Free Standard - https://sketchfab.com/3d-models/2010-toyota-prius-f4ed90af97264198b65f28a7532be138
+hiace: "2005 Toyota HiAce" by ActsOfDoge (ActsOfDoge) - Free Standard - https://sketchfab.com/3d-models/2005-toyota-hiace-c8a13f7fa53e45a2b151339d402f3392
+jpntaxi: "2018 Toyota JPN Taxi" by ActsOfDoge (ActsOfDoge) - Free Standard - https://sketchfab.com/3d-models/2018-toyota-jpn-taxi-93e0b7845e0a4c97b8ec28669875cc78
+crown: "1995 Toyota Crown Comfort" by ActsOfDoge (ActsOfDoge) - Free Standard - https://sketchfab.com/3d-models/1995-toyota-crown-comfort-1c9c0948cff04c959559ad72d4df1138
+march: "2005 Nissan March" by ActsOfDoge (ActsOfDoge) - Free Standard - https://sketchfab.com/3d-models/2005-nissan-march-962057d976d44332b288f692191eb3c3
+rav4: "2017 Toyota RAV4" by ActsOfDoge (ActsOfDoge) - Free Standard - https://sketchfab.com/3d-models/2017-toyota-rav4-a48ce5bd39684e9babf49b1c324700bd
+camry: "Toyota Camry" by Korolv (Korolv) - Free Standard - https://sketchfab.com/3d-models/toyota-camry-102ee362ef31442e9bdcf1d64a86727c
+leaf: "Nissan Leaf" by Nieve5677 (niev) - CC Attribution - https://sketchfab.com/3d-models/nissan-leaf-b18a1252b8504bcf843bc870793451c6
+selega: "Hino S'elega" by ActsOfDoge (ActsOfDoge) - Free Standard - https://sketchfab.com/3d-models/hino-selega-b09c4130e2764469b6265477b6eedd69
+elf: "2006 Isuzu Elf" by ActsOfDoge (ActsOfDoge) - Free Standard - https://sketchfab.com/3d-models/2006-isuzu-elf-a2e86b9db3ff4636a4164de55c4f430e
+coaster: "toyota coaster 2017" by Emmet3DJFK (Emmetv96) - CC Attribution - https://sketchfab.com/3d-models/toyota-coaster-2017-b59e858adf6944ecba44bd4ce88acfa5
+fit: "2009 Honda Fit" by ActsOfDoge (ActsOfDoge) - Free Standard - https://sketchfab.com/3d-models/2009-honda-fit-808696911a134c2683f012447e7ea8e3
+ergamio: "Isuzu Erga Mio bus" by own.guest (own.guest) - CC Attribution - https://sketchfab.com/3d-models/isuzu-erga-mio-bus-050e8acd0bbc4da0902a8a874ef10fca
+dutro: "Hino Dutro" by ActsOfDoge (ActsOfDoge) - Free Standard - https://sketchfab.com/3d-models/hino-dutro-a58fddeea8e44d2baf99fda921a3bdb0
+
+selega (観光バス) は伊予鉄風のオレンジに塗り、元の塗装・社名を消している。ergamio (路線バス) のテクスチャは tools/bus_repaint.py で緑をオレンジに塗り直し、社名・番号・ナンバー・行先・ステッカー・透かしを消している。
+
+歩行者 (街の人) の3Dモデルの出典 (Poly Pizza からダウンロード。元は raw/people/*.glb、tools/build_people.mjs で歩き・立ち・座り以外のアニメを外して site/people.dat.wasm に詰めている。服・髪・肌の色はゲームの中で人ごとに塗り替える。文字やロゴはない)
+
+ライセンス: CC0 1.0 (パブリックドメイン。表示は任意だが作者に感謝して記す)。
+
+man_casual: "Man" by Quaternius - CC0 - https://poly.pizza/m/HMnuH5geEG
+man_suit: "Man in Suit" by Quaternius - CC0 - https://poly.pizza/m/mQnGoME1ez
+woman_casual: "Woman Casual" by Quaternius - CC0 - https://poly.pizza/m/jpKRgGDxhk
+woman_jacket: "Woman" by Quaternius - CC0 - https://poly.pizza/m/AQsd9ngvKU
+woman_dress: "Woman in Dress" by Quaternius - CC0 - https://poly.pizza/m/zMyPlQXBzq
+
+おまけ「愛媛大学最強号」の改造トラック版の元の車 (Sketchfab からダウンロード。tools/build_gaisen.mjs でエンブレムをつぶし、元のナンバーを塗りつぶし、軽くして site/gaisen.dat.wasm に詰めている。箱・看板・飾り・ランプ・タイヤはゲームの中で作っている):
+profia: "HINO PROFIA" by teenlin3 (teenlin3) - CC Attribution - https://sketchfab.com/3d-models/hino-profia-dacbb2dbf4434bc3a44f23ebc7448fa2
+選挙カー版は上の一般車のハイエース (hiace) に、看板・スピーカー・お立ち台などをゲームの中で載せている。屋根の上の人は上の Quaternius の人のモデル (man_suit・man_casual)。
