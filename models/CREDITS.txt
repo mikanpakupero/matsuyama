@@ -34,6 +34,6 @@ woman_casual: "Woman Casual" by Quaternius - CC0 - https://poly.pizza/m/jpKRgGDx
 woman_jacket: "Woman" by Quaternius - CC0 - https://poly.pizza/m/AQsd9ngvKU
 woman_dress: "Woman in Dress" by Quaternius - CC0 - https://poly.pizza/m/zMyPlQXBzq
 
-おまけ「愛媛大学最強号」の改造トラック版の元の車 (Sketchfab からダウンロード。tools/build_gaisen.mjs でエンブレムをつぶし、元のナンバーを塗りつぶし、軽くして site/gaisen.dat.wasm に詰めている。箱・看板・飾り・ランプ・タイヤはゲームの中で作っている):
+おまけ「最強号」の改造トラック版の元の車 (Sketchfab からダウンロード。tools/build_gaisen.mjs でエンブレムをつぶし、元のナンバーを塗りつぶし、軽くして site/gaisen.dat.wasm に詰めている。箱・看板・飾り・ランプ・タイヤはゲームの中で作っている):
 profia: "HINO PROFIA" by teenlin3 (teenlin3) - CC Attribution - https://sketchfab.com/3d-models/hino-profia-dacbb2dbf4434bc3a44f23ebc7448fa2
 選挙カー版は上の一般車のハイエース (hiace) に、看板・スピーカー・お立ち台などをゲームの中で載せている。屋根の上の人は上の Quaternius の人のモデル (man_suit・man_casual)。

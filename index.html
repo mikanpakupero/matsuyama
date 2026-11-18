@@ -143,7 +143,7 @@ label.chk{font-size:13px;color:var(--mute);display:flex;gap:6px;align-items:cent
     <button class="go mode" id="btnCastle" style="grid-column:1/-1"><b>タイムアタック：お城一周 🏯</b><span>JR松山駅を出て、路面電車と並んで松山城のまわりを一周（約7km）。自己ベストを記録</span></button>
     <button class="mode" id="btnFly" style="grid-column:1/-1"><b>飛行モード ✈</b><span>空から松山の街を自由に見て回る。W/A/S/D・Space/Q・矢印/ドラッグで視点、Shiftで速く</span></button>
     <button class="mode" id="btnFreeDogo" style="grid-column:1/-1"><b>フリー走行：道後温泉から ♨</b><span>道後温泉本館・坊っちゃん列車・道後公園のあたりからスタート</span></button>
-    <button class="mode" id="btnOmake" style="grid-column:1/-1"><b>おまけ：愛媛大学最強号 📣</b><span>街を走り続ける黒い街宣バスを追いかけて、いろんな角度から眺める（音あり）</span></button>
+    <button class="mode" id="btnOmake" style="grid-column:1/-1"><b>おまけ：最強号 📣</b><span>街を走り続ける黒い街宣バスを追いかけて、いろんな角度から眺める（音あり）</span></button>
   </div>
   <div class="route">
     <span>愛大南（鉄砲町）</span><i>›</i><span>上一万</span><i>›</i><span>勝山町</span><i>›</i><span>大街道</span><i>›</i><span>県庁前</span><i>›</i><span>市役所前</span><i>›</i><span>南堀端</span><i>›</i><span>花園町</span><i>›</i><span class="goal">松山市駅</span>
@@ -343,12 +343,15 @@ const TIMES = {
   /* 日陰の明るさ: ストリートビュー (国道33号・市役所前) では日陰の路面が日なたの半分くらいの灰色 (RGB 86前後)。hemi を強く、色は青すぎない灰色に */
   /* 白が白すぎ: ストリートビューの白い建物の壁は平均 120 前後 (0〜255)、ゲームは 150〜170 だった → 露出と太陽を少し下げる (日陰は hemi のまま) */
   morning: { el: 18, az: 112, exp: 0.6, fog: 0xbcc3cc, fogD: 0.00018, sunC: 0xffdcb4, i: 3.3, hemi: 2.6, hemiC: 0xd0d6e4, hemiG: 0x968c7a, envK: 0.25, sky: [3, 2, 0.004, 0.8], skyK: 0.55, night: 0 },
-  noon: { el: 50, az: 160, exp: 0.62, fog: 0xb2c1d2, fogD: 0.00016, sunC: 0xfff4e6, i: 3.3, hemi: 3.0, hemiC: 0xd4d9e4, hemiG: 0x9a907e, envK: 0.3, sky: [2.5, 2.2, 0.003, 0.8], skyK: 0.45, night: 0 },
+  /* 昼 = 真夏の昼下がり (14時ごろ、太陽は南西の高い所)。南南東 (az 160) だと南北の通りでカメラの真後ろから照らして、どの壁も正面から光が当たり平べったかった。
+     太陽を強く・空の光を少し弱く・露出を下げて、日なたと日陰の壁の差をつける (白の飛び・日陰のつぶれは camfx の白の肩 hi と暗部の持ち上げ toe で抑える) */
+  noon: { el: 62, az: 232, exp: 0.5, fog: 0xb2c1d2, fogD: 0.00022, sunC: 0xfff4e6, i: 5.5, hemi: 2.4, hemiC: 0xd4d9e4, hemiG: 0x9a907e, envK: 0.3, sky: [2.5, 2.2, 0.003, 0.8], skyK: 0.45, night: 0 },
   /* 夕方: 低い太陽の色を濃い橙にすると路面全体が赤茶色になる。写真では路面は暗い灰色に少し橙が乗る程度で、日陰の壁も灰色 → 太陽は淡い橙で弱め、空からの光 (hemi・envK) を強める */
   evening: { el: 7, az: 255, exp: 0.6, fog: 0xb8aca0, fogD: 0.00017, sunC: 0xffcc9c, i: 2.6, hemi: 2.2, hemiC: 0xb4bcd2, hemiG: 0x857868, envK: 0.28, sky: [6, 2, 0.006, 0.9], skyK: 0.6, night: 0.25 },
   night: { el: -14, az: 300, exp: 0.8, fog: 0x1a2136, fogD: 0.00012, sunC: 0x8fa8ff, i: 0.35, hemi: 0.12, hemiC: 0x3a4a78, hemiG: 0x1a1610, envK: 1, sky: [4.5, 1.5, 0.004, 0.8], night: 1, moon: { el: 42, az: 140 } },
 };
 let NIGHT = 0, curTime = 'noon';
+window.__times = TIMES;   /* テスト用 (tools/tone_probe.js): 値を変えてから setTime で見比べる */
 function setTime(k) {
   const T = TIMES[k]; const phi = THREE.MathUtils.degToRad(90 - T.el), th = THREE.MathUtils.degToRad(T.az);
   sunDir.set(Math.sin(th) * Math.sin(phi), Math.cos(phi), -Math.cos(th) * Math.sin(phi));
@@ -1213,7 +1216,7 @@ function asphaltTex(marking, lanes = 2) {
   // fine aggregate noise
   const id = g.getImageData(0, 0, W, H), d = id.data; for (let i = 0; i < d.length; i += 4) { const n = (Math.random() - 0.5) * 26 + (Math.random() < 0.02 ? 30 : 0); d[i] += n; d[i + 1] += n; d[i + 2] += n; } g.putImageData(id, 0, 0);
   /* 汚れ: 楕円1つだと形がそろって目立つので、小さな薄い点をランダムに歩かせて重ね、ふちの不規則なしみにする */
-  for (let i = 0; i < 7; i++) { let x = Math.random() * W, y = Math.random() * H; const n = 40 + Math.random() * 60, a = 0.012 + Math.random() * 0.02;
+  for (let i = 0; i < 7; i++) { let x = Math.random() * W, y = Math.random() * H; const n = 40 + Math.random() * 60, a = 0.005 + Math.random() * 0.008;   /* 薄く: 濃いと 16m ごとに同じ黒いしみが並んで見えた (ストリートビュー 2025 の駅前通りはほぼ一様な明るい灰色) */
     for (let k = 0; k < n; k++) { x += (Math.random() - 0.5) * 14; y += (Math.random() - 0.5) * 26; const r = 3 + Math.random() * 11; g.fillStyle = `rgba(18,18,20,${a})`; g.beginPath(); g.arc((x + W) % W, (y + H) % H, r, 0, 7); g.fill(); } }
   /* 油じみ: 車線の真ん中に、進む向きに細長くぽたぽたと */
   for (let l = 0; l < lanes; l++) { const cx = (l + 0.5) / lanes * W; for (let y = Math.random() * 60; y < H; y += 20 + Math.random() * 90) { const r = 1.5 + Math.random() * 4; g.fillStyle = `rgba(12,12,14,${0.05 + Math.random() * 0.08})`; g.beginPath(); g.arc(cx + (Math.random() - 0.5) * 18, y, r, 0, 7); g.fill(); } }
@@ -1415,18 +1418,26 @@ function buildRoads() {
   const zc = document.createElement('canvas'); zc.width = 256; zc.height = 64; const zg = zc.getContext('2d'); zg.clearRect(0, 0, 256, 64); zg.fillStyle = '#efeee8'; for (let x = 4; x < 256; x += 32) zg.fillRect(x, 0, 16, 64);
   const zt = new THREE.CanvasTexture(zc); zt.colorSpace = THREE.SRGBColorSpace; zt.wrapS = THREE.RepeatWrapping; zt.anisotropy = 8;
   const zp = [], zu = [], zDone = [], zRec = []; ZEBRA_REC = zRec;   /* 横断歩道の位置は木を置かない判定にも使う (treeSpotBad) */
+  /* 信号のある交差点を道が切れずに通り抜けている所 (駅前通りなど OSM の長い道): 交差点の両側に横断歩道 (ストリートビュー 2025: 信号の交差点はどの枝にも横断歩道) */
+  const zArms = []; for (const [sx, sz] of G.signals || []) for (const r of car) { if (r.cls === 'small') continue; const P = r.pts; let bi = -1, bt = 0, bd = 144;
+    for (let i = 0; i < P.length - 1; i++) { const vx = P[i + 1][0] - P[i][0], vz = P[i + 1][1] - P[i][1], l2 = vx * vx + vz * vz || 1, t = Math.max(0, Math.min(1, ((sx - P[i][0]) * vx + (sz - P[i][1]) * vz) / l2)), d = (P[i][0] + vx * t - sx) ** 2 + (P[i][1] + vz * t - sz) ** 2; if (d < bd) { bd = d; bi = i; bt = t; } }
+    if (bi < 0) continue; const a = P[bi], b = P[bi + 1], q = [a[0] + (b[0] - a[0]) * bt, a[1] + (b[1] - a[1]) * bt];
+    zArms.push({ r, P: [q, ...P.slice(bi + 1)] }, { r, P: [q, ...P.slice(0, bi + 1).reverse()] }); }
   for (const r of car) {
     if (r.cls === 'small') continue;
     for (const atEnd of [0, 1]) {
       const P = atEnd ? r.pts.slice().reverse() : r.pts; if ((ends.get(key(P[0])) || 0) < 3) continue;
+      zPlace(r, P, 7); } }
+  for (const { r, P } of zArms) zPlace(r, P, 10);
+  function zPlace(r, P, gap) { {
       // 交差点の外 (ほかの車道にかからない所) まで下げて置く: OSM の道は交差点の中で細かく切れているので、切れ目の点から測ると交差点の真ん中に入ってしまう
       const otherRoad = (x, z) => { const gg = roadGrid(), gx = Math.floor(x / 10), gz = Math.floor(z / 10); for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const [px, pz, rr, id] of gg.get((gx + a) + ',' + (gz + b)) || []) if (id !== r.id && id >= 0 && (px - x) ** 2 + (pz - z) ** 2 < (rr + 0.6) ** 2) return true; return false; };
       const at = d => { let acc = 0; for (let i = 0; i < P.length - 1; i++) { const L = Math.hypot(P[i + 1][0] - P[i][0], P[i + 1][1] - P[i][1]); if (acc + L >= d) { const t = (d - acc) / (L || 1), dx = (P[i + 1][0] - P[i][0]) / (L || 1), dz = (P[i + 1][1] - P[i][1]) / (L || 1); return [P[i][0] + (P[i + 1][0] - P[i][0]) * t, P[i][1] + (P[i + 1][1] - P[i][1]) * t, dx, dz]; } acc += L; } return null; };
       let hit = null, hitD = 0; for (let d = 3; d <= 32; d += 1) { const q = at(d); if (!q) break; const [qx, qz, qdx, qdz] = q, hw0 = r.w / 2 - 0.4; if (!otherRoad(qx, qz) && !otherRoad(qx + qdx * 2, qz + qdz * 2) && !otherRoad(qx - qdx * 2, qz - qdz * 2))   /* 横方向の端は見ない (上下線が別の道の2車線道路で、反対車線に当たってしまうため) */ { hit = at(d + 1.5); hitD = d + 1.5; break; } }
-      if (!hit) continue;
+      if (!hit) return;
       const [cx, cz, dx, dz] = hit, nx = -dz, nz = dx, hw = r.w / 2 - 0.4, hd = 2;
-      if (zDone.some(([x, z]) => Math.hypot(x - cx, z - cz) < 7)) continue; zDone.push([cx, cz]);
-      if ((G.subrails || []).some(r => { for (let k = 0; k < r.p.length - 2; k += 2) { const ax = r.p[k], az = r.p[k + 1], bx = r.p[k + 2], bz = r.p[k + 3]; const vx = bx - ax, vz = bz - az, l2 = vx * vx + vz * vz || 1; const tt = Math.max(0, Math.min(1, ((cx - ax) * vx + (cz - az) * vz) / l2)); if (Math.hypot(ax + vx * tt - cx, az + vz * tt - cz) < 10) return true; } return false; })) continue;   // 踏切の上には描かない
+      if (zDone.some(([x, z]) => Math.hypot(x - cx, z - cz) < gap)) return; zDone.push([cx, cz]);
+      if ((G.subrails || []).some(r => { for (let k = 0; k < r.p.length - 2; k += 2) { const ax = r.p[k], az = r.p[k + 1], bx = r.p[k + 2], bz = r.p[k + 3]; const vx = bx - ax, vz = bz - az, l2 = vx * vx + vz * vz || 1; const tt = Math.max(0, Math.min(1, ((cx - ax) * vx + (cz - az) * vz) / l2)); if (Math.hypot(ax + vx * tt - cx, az + vz * tt - cz) < 10) return true; } return false; })) return;   // 踏切の上には描かない
       const gyz = groundAt(cx, cz) + 0.205;
       const q = [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]].map(([a, b]) => { const x = cx + nx * a + dx * b, z = cz + nz * a + dz * b; return [x, gyz, z]; });
       const rep = r.w / 4;
@@ -1445,7 +1456,7 @@ function buildRoads() {
       let len = 0; for (let i = 1; i < P.length; i++) len += Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]);
       const isBlue = /^(trunk|primary)/.test(k) && len > 30 && P.filter(p => blueZ(p[0], p[1])).length >= P.length * 0.6; if (!bike && !isBlue) continue;   /* 交差点の中の短い道 (30m 以下) は塗らない (車線の上に青い四角が出た) */
       if (isBlue === false && blueZ(mid[0], mid[1]) && len <= 30) continue;
-      const hw = isBlue ? roadHW(k, flat) : /^tertiary/.test(k) ? 4.75 : 6.5, heiwa = mid[0] > -262 && mid[0] < 268 && mid[1] > 230 && mid[1] < 280;
+      const hw = isBlue ? roadHW(k, flat) : /^tertiary/.test(k) ? 4.75 : 6.5, heiwa = mid[0] > -728 && mid[0] < 268 && mid[1] > 225 && mid[1] < 280;
       for (const s2 of [-1, 1]) { { const m = Math.floor(P.length / 2), a = P[Math.max(0, m - 1)], b = P[Math.min(P.length - 1, m)], dx = b[0] - a[0], dz = b[1] - a[1], l = Math.hypot(dx, dz) || 1, cx = (a[0] + b[0]) / 2, cz = (a[1] + b[1]) / 2; if ((heiwa ? [3.5, 6, 8.5] : [3.5]).some(o => onCarriageway(cx - dz / l * (hw + o) * s2, cz + dx / l * (hw + o) * s2, 0))) continue;   /* 中央分離帯の側 (外に別の車道がある側) には塗らない。平和通りは分離帯が広い (heiwaWiden) ので 8.5m 先まで見る */
           if (isBlue && (G.rails || []).some(f => { for (let i = 0; i < f.length - 2; i += 2) { const qx = cx - dz / l * (hw + 3) * s2, qz = cz + dx / l * (hw + 3) * s2; if (Math.hypot(f[i] - qx, f[i + 1] - qz) < 8) return true; } return false; })) continue; }   /* 青い帯は線路の側 (道の真ん中) には塗らない */
         const L2 = P.map((p, i) => { const a = P[Math.max(0, i - 1)], b = P[Math.min(P.length - 1, i + 1)]; const dx = b[0] - a[0], dz = b[1] - a[1], l = Math.hypot(dx, dz) || 1; return [p[0] - dz / l * (hw - 0.8) * s2, p[1] + dx / l * (hw - 0.8) * s2]; });
@@ -1455,6 +1466,8 @@ function buildRoads() {
         lanes.push({ pts: L2, w: 1.2 });
         let acc = 10; for (let i = 0; i < L2.length - 1; i++) { const a = L2[i], b = L2[i + 1], l = Math.hypot(b[0] - a[0], b[1] - a[1]); while (acc < l) { arrows.push([a[0] + (b[0] - a[0]) * acc / l, a[1] + (b[1] - a[1]) * acc / l, Math.atan2((b[0] - a[0]) * s2, (b[1] - a[1]) * s2)]); acc += 30; } acc -= l; } } }
     if (blue.length) { const bm = mk(blue, null, 0.195, -6, 0.9); if (bm) { bm.material.map = null; bm.material.color.setHex(0x5a8fcf); bm.material.needsUpdate = true; } }
+    /* 西堀端の南行き: 歩道 (お堀) 側の車線がえんじ色のカラー舗装 (ストリートビュー 2025-06、駅前通りの交差点の先から南堀端の手前まで)。車線の白線の間だけ */
+    { const rm = mk([{ pts: [[-1266.8, 1082], [-1267.3, 1104], [-1267.8, 1126]], w: 3.3 }, { pts: [[-1266.9, 1010], [-1267.0, 1025], [-1267.0, 1039]], w: 3.2 }, { pts: [[-1262.25, 120], [-1262.5, 170], [-1262.8, 222]], w: 3.2 }]   /* 3本目: 本町 (南へ、z 120〜222) */   /* 2本目: 交差点の手前 (本町から南へ、ストリートビュー 2025-04) */, null, 0.195, -6, 0.95, 8); if (rm) { rm.material.map = null; rm.material.color.setHex(0x9a5446); rm.material.needsUpdate = true; } }
     if (lanes.length || blue.length) { const gm = lanes.length ? mk(lanes, null, 0.195, -6, 0.9) : null; if (gm) { gm.material.map = null; gm.material.color.setHex(0x4e8058); gm.material.needsUpdate = true; }
       const ag = new THREE.ShapeGeometry(new THREE.Shape([new THREE.Vector2(-0.12, -0.6), new THREE.Vector2(0.12, -0.6), new THREE.Vector2(0.12, 0.1), new THREE.Vector2(0.32, 0.1), new THREE.Vector2(0, 0.6), new THREE.Vector2(-0.32, 0.1), new THREE.Vector2(-0.12, 0.1)])); ag.rotateX(-Math.PI / 2);
       const am = new THREE.InstancedMesh(ag, new THREE.MeshStandardMaterial({ color: 0xf2f2ee, polygonOffset: true, polygonOffsetFactor: -8, polygonOffsetUnits: -16 }), arrows.length); const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
@@ -1465,7 +1478,7 @@ function buildRoads() {
     const street = (x, z, dx, dz) => { const gx = Math.floor(x / 20), gz = Math.floor(z / 20); for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (const [ax, az, bx, bz] of grid.get((gx + a) + ',' + (gz + b)) || []) { const vx = bx - ax, vz = bz - az, L = Math.hypot(vx, vz); if (L < 1 || Math.abs((vx * dx + vz * dz) / L) < 0.85) continue; const t = Math.max(0, Math.min(1, ((x - ax) * vx + (z - az) * vz) / (L * L))); if (Math.hypot(ax + vx * t - x, az + vz * t - z) < 12) return true; } return false; };
     const runs = [];
     for (const flat of G.rails) { let cur = [];
-      for (let i = 0; i < flat.length - 2; i += 2) { const ax = flat[i], az = flat[i + 1], bx = flat[i + 2], bz = flat[i + 3], L = Math.hypot(bx - ax, bz - az) || 1; const ok = street((ax + bx) / 2, (az + bz) / 2, (bx - ax) / L, (bz - az) / L) && !(ax > -1000 && ax < -840 && az > 1480 && az < 1530);
+      for (let i = 0; i < flat.length - 2; i += 2) { const ax = flat[i], az = flat[i + 1], bx = flat[i + 2], bz = flat[i + 3], L = Math.hypot(bx - ax, bz - az) || 1; const ok = street((ax + bx) / 2, (az + bz) / 2, (bx - ax) / L, (bz - az) / L) && !(ax > -1000 && ax < -840 && az > 1480 && az < 1530) && !(ax > -1260 && ax < -720 && az > 1125 && az < 1170) && !(ax > -730 && ax < -688 && az > 955 && az < 1130) && !(ax > -690 && ax < 70 && az > 880 && az < 1000) && !(ax > -1300 && ax < -1240 && az > -260 && az < 1040);   /* 南堀端・市役所前〜県庁前は上下線の間を buildSidewalks の石畳で埋める (幅 13m の帯が細くした国道の上に出ていた) */
         if (ok) { if (!cur.length) cur.push([ax, az]); cur.push([bx, bz]); } else if (cur.length) { runs.push({ pts: cur, w: 13 }); cur = []; } }
       if (cur.length > 1) runs.push({ pts: cur, w: 13 }); }
     { const m = mk(runs.map(r => ({ pts: smoothLine(r.pts), w: r.w })), asphaltTex('none', 1), 0.15, -3.5, 0.95, 16); if (m) { m.material.color.setHex(0xe4e4e4); asphaltShader(m.material, 1, 1); } } }   /* 車道と同じむら・色 (車線の間から明るく見えないように) */
@@ -3524,16 +3537,21 @@ function buildHotels() {
 const NARROW_HW = new WeakMap();
 function roadHW(k, flat) { const o = NARROW_HW.get(flat); if (o) return o; return /^(trunk|primary)/.test(k) ? 7.5 : /^secondary/.test(k) ? 6.5 : /^tertiary/.test(k) ? 4.75 : /^unclassified/.test(k) ? 3.5 : /^(residential|living_street)/.test(k) ? 2.75 : k === 'service' ? 2 : 0; }
 function narrowRoads() {
-  const railD = (x, z) => { let b = 1e9; for (const f of G.rails || []) for (let i = 0; i < f.length - 2; i += 2) { const ax = f[i], az = f[i + 1], vx = f[i + 2] - ax, vz = f[i + 3] - az; if (Math.abs(ax - x) > 80 && Math.abs(f[i + 2] - x) > 80) continue; const l2 = vx * vx + vz * vz || 1, t = Math.max(0, Math.min(1, ((x - ax) * vx + (z - az) * vz) / l2)); b = Math.min(b, Math.hypot(ax + vx * t - x, az + vz * t - z)); } return b; };
+  const railD = (x, z) => { let b = 1e9; for (const f of G.rails || []) for (let i = 0; i < f.length - 2; i += 2) { const ax = f[i], az = f[i + 1], vx = f[i + 2] - ax, vz = f[i + 3] - az; if (Math.min(ax, f[i + 2]) - 80 > x || Math.max(ax, f[i + 2]) + 80 < x) continue; const l2 = vx * vx + vz * vz || 1, t = Math.max(0, Math.min(1, ((x - ax) * vx + (z - az) * vz) / l2)); b = Math.min(b, Math.hypot(ax + vx * t - x, az + vz * t - z)); } return b; };
   /* 勝山通り (x 245〜290, z 320〜880) の上り下りの国道: 線路が 5〜8m 横を並んで走る区間 */
   for (const [k, w, cov, f] of G.roads) { if (!/^primary$/.test(k) || f.length < 8) continue; let n = 0, m = 0;
     for (let i = 0; i < f.length; i += 2) { if (f[i] < 240 || f[i] > 292 || f[i + 1] < 310 || f[i + 1] > 885) continue; n++; const d = railD(f[i], f[i + 1]); if (d > 3.8 && d < 8.5) m++; }
     if (n >= 6 && m >= n * 0.6) NARROW_HW.set(f, 3.7); }
+  /* 南堀端 (x -1260〜-720): 上り下りの国道の間に軌道 (石畳)。ストリートビュー 2025-02: 片側2車線 (約 7m) のすぐ外から石畳。国道の既定の幅 15m だと軌道が車線の 12m 先になっていた */
+  for (const [k, w, cov, f] of G.roads) { if (!/^(trunk|primary)$/.test(k) || f.length < 4) continue; let n = 0, m = 0;
+    for (let i = 0; i + 3 < f.length; i += 2) { const L = Math.hypot(f[i + 2] - f[i], f[i + 3] - f[i + 1]); for (let s = 0; s < L; s += 5) { const x = f[i] + (f[i + 2] - f[i]) * s / L, z = f[i + 1] + (f[i + 3] - f[i + 1]) * s / L;   /* 5m ごとに見る (点の少ない長い道) */
+      if (!((x > -1260 && x < -720 && z > 1125 && z < 1170) || (x > -730 && x < -688 && z > 955 && z < 1130) || (x > -690 && x < 70 && z > 880 && z < 1000) || (x > -1300 && x < -1240 && z > -260 && z < 1040))) continue; n++;   /* 4つ目: 本町通 (本町〜西堀端、真ん中に単線) */   /* 2つ目の箱: 市役所前〜県庁前 (北へ)、3つ目: 一番町 (県庁前〜大街道〜勝山町の手前)。ストリートビュー 2025: どこも片側2車線の間に軌道 */ const d = railD(x, z); if (d > 3.8 && d < 8.5) m++; } }
+    if (n >= 6 && m >= n * 0.6) NARROW_HW.set(f, 3.6); }
 }
 let HEIWA_MED = [];
 function heiwaWiden() {
-  const zm = x => 247.75 + (x + 226) * 14 / 482, inX = x => x > -262 && x < 268;
-  const amt = x => 1.75 * Math.max(0, Math.min(1, (x + 256) / 30, (262 - x) / 26));
+  const zm = x => 247.75 + (x + 226) * 14 / 482, inX = x => x > -728 && x < 268;   /* 西は鉄砲町の先 (x -720) まで分離帯が続く (ストリートビュー 2025-07) */
+  const amt = x => 1.75 * Math.max(0, Math.min(1, (x + 722) / 30, (262 - x) / 26));
   const N = [], S = [];
   for (const [k, w, cov, flat, bike] of G.roads) { if (!/^tertiary$/.test(k) || !bike) continue;
     for (let i = 0; i < flat.length - 2; i += 2) { const ax = flat[i], az = flat[i + 1], bx = flat[i + 2], bz = flat[i + 3]; if (!inX(ax) || !inX(bx) || Math.abs(bz - az) > Math.abs(bx - ax) * 0.2) continue;
@@ -3555,7 +3573,7 @@ function heiwaWiden() {
   /* 中央分離帯の中心と幅 (2m ごと)。交わる道・Uターンの切れ目 (分離帯の中を通る道) は前後 7m あける */
   const NS = N.map(s => [s[0], s[1] + shiftOf(s[0], s[1], false), s[2], s[3] + shiftOf(s[2], s[3], false)]), SS = S.map(s => [s[0], s[1] + shiftOf(s[0], s[1], false), s[2], s[3] + shiftOf(s[2], s[3], false)]);
   const open = []; for (const [k, w, cov, f] of G.roads) { if (!/^(trunk|primary|secondary|tertiary|unclassified|residential)/.test(k)) continue; for (let i = 0; i < f.length; i += 2) for (const t of i + 2 < f.length ? [0, 0.5] : [0]) { const x = f[i] + (t ? (f[i + 2] - f[i]) * t : 0), z = f[i + 1] + (t ? (f[i + 3] - f[i + 1]) * t : 0), zn = zOn(NS, x), zs = zOn(SS, x); if (zn !== null && zs !== null && z > zn + 2 && z < zs - 2) open.push(x); } }
-  for (let x = -222; x <= 250; x += 2) { const zn = zOn(NS, x), zs = zOn(SS, x), zn2 = zOn(NS, x + 2), zs2 = zOn(SS, x + 2); if (zn === null || zs === null || zn2 === null || zs2 === null) continue;
+  for (let x = -690; x <= 188; x += 2) { const zn = zOn(NS, x)   /* 東の端 (x 190〜262) は上一万へ向かう軌道が真ん中を通る (ストリートビュー 2025-07: 石畳の軌道で植え込みなし) */, zs = zOn(SS, x), zn2 = zOn(NS, x + 2), zs2 = zOn(SS, x + 2); if (zn === null || zs === null || zn2 === null || zs2 === null) continue;
     if (open.some(o => Math.abs(o - (x + 1)) < 8)) continue;
     const w = (zs + zs2) / 2 - (zn + zn2) / 2 - 9.5; if (w < 2) continue;
     HEIWA_MED.push({ x: x + 1, z: ((zn + zs) / 2 + (zn2 + zs2) / 2) / 2, w, dx: 2, dz: (zn2 + zs2 - zn - zs) / 2 }); }
@@ -3577,7 +3595,7 @@ function buildMedianAndBridges() {
   const hedgeTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d'), rnd = fzRand(4711); g.fillStyle = '#2f4a22'; g.fillRect(0, 0, 128, 128);
     for (let i = 0; i < 900; i++) { const l = 18 + rnd() * 22; g.fillStyle = `hsl(${95 + rnd() * 25},${35 + rnd() * 20}%,${l}%)`; g.beginPath(); g.ellipse(rnd() * 128, rnd() * 128, 2 + rnd() * 3, 1.2 + rnd() * 2, rnd() * 3, 0, 7); g.fill(); }
     const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.repeat.set(1, 3); return t; })();
-  const mats = { grass: new THREE.MeshStandardMaterial({ color: 0x4f7a30, roughness: 1 }), curb: new THREE.MeshStandardMaterial({ color: 0xb7b4ac, roughness: 0.9 }), hedge: new THREE.MeshStandardMaterial({ map: hedgeTex, roughness: 0.85 }) };
+  const mats = { grass: new THREE.MeshStandardMaterial({ color: 0x7a7a46, roughness: 1 })   /* 植え込みの地の色: 真夏の乾いた黄緑 (ストリートビュー 2025-06/07、grass) */, curb: new THREE.MeshStandardMaterial({ color: 0xb7b4ac, roughness: 0.9 }), hedge: new THREE.MeshStandardMaterial({ map: hedgeTex, roughness: 0.85 }) };
   for (const n of ['grass', 'curb', 'hedge']) if (parts[n].length) { const mm = new THREE.Mesh(mergeGeometries(parts[n]), mats[n]); mm.receiveShadow = true; mm.castShadow = n === 'curb'; scene.add(mm); }
   /* イチョウ (高さ 9〜12m)。真夏なので明るい緑 (docs/worldview.md) */
   trees.forEach(([x, y, z, dx, dz], i) => { const h = 9 + ((i * 7919) % 7) / 7 * 3; addTree('keyaki', x, y, z, h, h * 0.26, [1.0, 1.08, 0.82], 5000 + i, ['median', dx, dz]); });
@@ -3703,6 +3721,256 @@ function busDoorLeaf(tris, za, zb, hinge, mat, glassMat) {
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.computeVertexNormals();
   const piv = new THREE.Group(); piv.position.copy(hinge); const a = new THREE.Mesh(g, mat); a.castShadow = true; piv.add(a); if (glassMat) { const q = new THREE.Mesh(g, glassMat); q.name = 'busglass'; q.renderOrder = 2; piv.add(q); } return piv;
 }
+/* ---- 自分のバスの塗装 (プレイヤーが選ぶ。架空の会社の配色だけ、文字・ロゴなし) ----
+   車体のテクスチャ (tools/bus_repaint.py で塗装の所を一色 #ec581e にしたもの) から、その色の画素を「塗装のマスク」として取り出し、
+   シェーダーで塗装の所だけを、バスの高さで分けた色に置き換える: 下から スカート / ベース / 帯2 (細い線) / ベース / 帯 (窓の下の太い帯) / ベース / 屋根。
+   窓・ライト・ゴム・タイヤ・黒い窓まわりはマスクの外なので塗らない。マスクの値で混ぜるので (足し算)、ぼけた縁もきれいにつながる。
+   色は BUS_PAINT.u の共有の uniform なので、選び直すとすぐ全部の部品に反映。選んだ色は localStorage (mcr_busPaint) */
+const BUS_PAINT_PRESETS = [
+  { id: 'seto', name: '瀬戸内ライン', base: '#f3f1ea', band: '#1d5fa6', band2: '#2fb3c6', roof: '#2b3f58' },   /* 既定: 白い車体に海の青の帯と水色の線 */
+  { id: 'sora', name: '白と空色', base: '#fbfbf8', band: '#5cc0ec', band2: '#a8def4', roof: '#c9d3da' },
+  { id: 'midori', name: '緑の帯', base: '#f2f1e8', band: '#2e8a4c', band2: '#a3cc3a', roof: '#33463a' },
+  { id: 'himawari', name: 'ひまわり', base: '#f4cf45', band: '#245fa8', band2: '#fbfaf2', roof: '#3a3e44' },
+  { id: 'yako', name: '夜行バス風', base: '#1b2a48', band: '#c4a04c', band2: '#e8e5da', roof: '#0f1729' } ];
+const BUS_PAINT = { cur: null, mask: new Map(), mats: [], u: { uPO: { value: new THREE.Color(0xec581e) }, uPBase: { value: new THREE.Color() }, uPBand: { value: new THREE.Color() }, uPBand2: { value: new THREE.Color() }, uPRoof: { value: new THREE.Color() },
+  uPYa: { value: new THREE.Vector3(0.42, 0.6, 0.67) }, uPYb: { value: new THREE.Vector3(0.78, 1.0, 2.43) } } };   /* 高さ (m、地面から): スカートの上端・帯2の下・上、帯の下・上、屋根の下端 */
+function busPaintMask(map) {   /* 塗装の画素 = 1 のマスク (1回だけ作る)。スマホの軽いモードで縮んだ画像でも、色の近さで少しぼかして拾う */
+  const im = map && map.image; if (!im || !im.width) return null; if (BUS_PAINT.mask.has(im)) return BUS_PAINT.mask.get(im);
+  const w = im.width, h = im.height, c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(im, 0, 0, w, h);
+  const d = g.getImageData(0, 0, w, h), p = d.data;
+  /* 縁や細い線の画素は、オレンジと灰色 (黒い窓枠・白や灰色の線) が混ざった色 (縮めたときのぼかし)。色 = t × オレンジ + 灰色 m として t と m を最小二乗で解き、
+     よく合う (残りが小さい) ときだけ t をマスクにする。赤や黄色のランプは灰色との混ざりでは合わないので塗らない */
+  const O0 = 236, O1 = 88, O2 = 30, d0 = O0 - 118, d1 = O1 - 118, d2 = O2 - 118, DD = d0 * d0 + d1 * d1 + d2 * d2;
+  for (let i = 0; i < p.length; i += 4) { const r = p[i], gg = p[i + 1], b = p[i + 2], cm = (r + gg + b) / 3, t = Math.max(0, Math.min(1, (d0 * (r - cm) + d1 * (gg - cm) + d2 * (b - cm)) / DD)), m = cm - t * 118,
+      e = Math.abs(r - t * O0 - m) + Math.abs(gg - t * O1 - m) + Math.abs(b - t * O2 - m);
+    const v = p[i + 3] < 200 || t < 0.06 || m < -10 || m > (1 - t) * 255 + 10 ? 0 : e <= 12 ? t : e >= 40 ? 0 : t * (40 - e) / 28; p[i] = p[i + 1] = p[i + 2] = Math.round(v * 255); p[i + 3] = 255; }
+  g.putImageData(d, 0, 0); const t = new THREE.CanvasTexture(c); t.flipY = map.flipY; t.wrapS = map.wrapS; t.wrapT = map.wrapT; t.colorSpace = THREE.NoColorSpace; t.channel = map.channel; BUS_PAINT.mask.set(im, t); return t;
+}
+/* デカール (ステッカー) の uniform: uDec は5つの面 (左・右・前・後ろ・屋根) を並べた canvas (BUS_DECAL が編集したときだけ描き直す)、uDF は各面の canvas の中の四角 (0〜1)、
+   uBMin / uBMax はバスの大きさ (バスの座標)。面は「バスの座標での向き」で選ぶ (下向きの面には貼らない) */
+Object.assign(BUS_PAINT.u, { uDec: { value: new THREE.DataTexture(new Uint8Array(4), 1, 1) }, uDecOn: { value: 0 }, uBMin: { value: new THREE.Vector3(-1.25, 0, -5) }, uBMax: { value: new THREE.Vector3(1.25, 2.6, 5) },
+  uDF: { value: [0, 1, 2, 3, 4].map(() => new THREE.Vector4()) } });
+BUS_PAINT.u.uDec.value.needsUpdate = true;
+function busPaintMat(mat, mask, toBus) {   /* 材質に塗装とデカールを足す。toBus: その部品の座標 → バスの座標 */
+  if (!mask) return; const U = BUS_PAINT.u, own = { uPMask: { value: mask }, uToBus: { value: toBus.clone() } }; BUS_PAINT.mats.push(mat);
+  mat.onBeforeCompile = sh => { Object.assign(sh.uniforms, U, own);
+    sh.vertexShader = 'uniform mat4 uToBus;\nvarying vec3 vBP, vBN;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n vBP = (uToBus * vec4(transformed, 1.0)).xyz; vBN = mat3(uToBus) * objectNormal;');
+    /* 夜は車体のテクスチャを発光にも使う (updateCarLights の BUS_NIGHT_GLOW) ので、発光も同じに塗り替える */
+    sh.fragmentShader = `uniform sampler2D uPMask, uDec; uniform vec3 uPO, uPBase, uPBand, uPBand2, uPRoof, uPYa, uPYb, uBMin, uBMax; uniform float uDecOn; uniform vec4 uDF[5];\nvarying vec3 vBP, vBN;
+vec3 busPC(float y) { return y < uPYa.x ? uPRoof : (y < uPYa.y ? uPBase : (y < uPYa.z ? uPBand2 : (y < uPYb.x ? uPBase : (y < uPYb.y ? uPBand : (y < uPYb.z ? uPBase : uPRoof))))); }
+vec4 busDecal() {
+  if (uDecOn < 0.5) return vec4(0.0);
+  vec3 n = normalize(vBN), p = vBP, e = uBMax - uBMin, a = abs(n); vec2 uv, sz; vec4 r;
+  if (n.y < -0.6) return vec4(0.0);
+  if (n.y > 0.6) { uv = vec2(p.z - uBMin.z, p.x - uBMin.x); sz = e.zx; r = uDF[4]; }
+  else if (a.x >= a.z) { sz = e.zy; if (n.x > 0.0) { uv = vec2(uBMax.z - p.z, p.y - uBMin.y); r = uDF[0]; } else { uv = vec2(p.z - uBMin.z, p.y - uBMin.y); r = uDF[1]; } }
+  else { sz = e.xy; if (n.z > 0.0) { uv = vec2(p.x - uBMin.x, p.y - uBMin.y); r = uDF[2]; } else { uv = vec2(uBMax.x - p.x, p.y - uBMin.y); r = uDF[3]; } }
+  vec2 t = uv / sz; if (t.x < 0.0 || t.y < 0.0 || t.x > 1.0 || t.y > 1.0) return vec4(0.0);
+  return texture2D(uDec, r.xy + t * r.zw);
+}\n` + sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+ diffuseColor.rgb = max(diffuseColor.rgb + texture2D(uPMask, vMapUv).r * (busPC(vBP.y) - uPO), 0.0);
+ vec4 busDc = busDecal(); diffuseColor.rgb = mix(diffuseColor.rgb, busDc.rgb, busDc.a);`).replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+#ifdef USE_EMISSIVEMAP
+ totalEmissiveRadiance = max(totalEmissiveRadiance + texture2D(uPMask, vEmissiveMapUv).r * (busPC(vBP.y) - uPO) * emissive, 0.0);
+ totalEmissiveRadiance = mix(totalEmissiveRadiance, busDc.rgb * emissive, busDc.a);
+#endif`); };
+  mat.customProgramCacheKey = () => 'buspaint'; mat.needsUpdate = true;
+}
+function busPaintLoad() { try { const s = JSON.parse(localStorage.getItem('mcr_busPaint') || 'null'); if (s && s.base) return s; } catch (e) {} return Object.assign({}, BUS_PAINT_PRESETS[0]); }
+function setBusPaint(p, save) {   /* p: { id?, base, band, band2, roof } (#rrggbb) */
+  const q = BUS_PAINT.cur = Object.assign({}, BUS_PAINT.cur || busPaintLoad(), p || {}), U = BUS_PAINT.u;
+  U.uPBase.value.set(q.base); U.uPBand.value.set(q.band); U.uPBand2.value.set(q.band2); U.uPRoof.value.set(q.roof);
+  if (BUS_PAINT.bodyM) BUS_PAINT.bodyM.color.set(q.base).multiplyScalar(0.85);   /* 運転席の外のミラーに映る車体の端 */
+  if (save) try { localStorage.setItem('mcr_busPaint', JSON.stringify(q)); } catch (e) {}
+  for (const f of busPaintUI.sync) f(q);
+}
+busPaintUI.sync = [];
+setBusPaint(null, false);
+window.__busPaint = { set: setBusPaint, presets: BUS_PAINT_PRESETS, P: BUS_PAINT };   /* テスト用 */
+/* メニューと一時停止メニューに「バスの塗装」: プリセットのボタン + 自由な色 (ベース・帯・帯2・屋根/スカート)。shell.html は変えずにここで差し込む */
+function busPaintUI(host, compact) {
+  if (!host || host.querySelector('.busPaint')) return; const box = document.createElement('div'); box.className = 'row busPaint'; box.style.cssText = 'margin-bottom:6px;flex-wrap:wrap;gap:6px;align-items:center';
+  box.innerHTML = '<span class="lbl" style="margin-right:4px">バスの塗装</span>';
+  const btns = BUS_PAINT_PRESETS.map(P => { const b = document.createElement('button'); b.type = 'button'; b.title = P.name; b.style.cssText = 'display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:3px 8px';
+    b.innerHTML = `<i style="display:inline-block;width:26px;height:14px;border-radius:3px;border:1px solid rgba(0,0,0,.35);background:linear-gradient(${P.roof} 0 18%,${P.base} 18% 40%,${P.band} 40% 62%,${P.base} 62% 72%,${P.band2} 72% 80%,${P.base} 80% 90%,${P.roof} 90%)"></i>${compact ? '' : P.name}`;
+    b.addEventListener('click', e => { e.stopPropagation(); setBusPaint(Object.assign({}, P), true); }); box.appendChild(b); return [P, b]; });
+  const det = document.createElement('details'); det.style.cssText = 'flex-basis:100%;font-size:12px'; det.innerHTML = '<summary>自由に色を選ぶ</summary>';
+  const grid = document.createElement('div'); grid.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;margin-top:6px'; det.appendChild(grid);
+  const ins = [['base', 'ベース'], ['band', '帯'], ['band2', '帯2'], ['roof', '屋根・スカート']].map(([k, n]) => { const l = document.createElement('label'); l.className = 'chk'; l.textContent = n + ' '; const i = document.createElement('input'); i.type = 'color'; i.style.cssText = 'width:34px;height:22px;padding:0;border:0;background:none';
+    i.addEventListener('input', () => setBusPaint({ id: 'custom', [k]: i.value }, true)); l.appendChild(i); grid.appendChild(l); return [k, i]; });
+  if (!compact && !host.closest('#garage')) { const g = document.createElement('button'); g.type = 'button'; g.className = 'go'; g.style.cssText = 'font-size:12px;padding:4px 10px'; g.textContent = 'ガレージ (デカールを貼る)';
+    g.addEventListener('click', e => { e.stopPropagation(); BUS_DECAL.open(); }); box.appendChild(g); }
+  box.appendChild(det); host.appendChild(box);
+  busPaintUI.sync.push(q => { for (const [k, i] of ins) i.value = q[k]; for (const [P, b] of btns) b.style.outline = q.id === P.id ? '2px solid currentColor' : ''; });
+  setBusPaint(null, false);
+}
+try { const mc = document.querySelector('#menu .card'), mr = mc && [...mc.querySelectorAll(':scope > .row')].pop(); if (mr) { const d = document.createElement('div'); mr.after(d); busPaintUI(d, false); }
+  const pc = document.querySelector('#pause .card > div[style*="grid"]'); if (pc) { const d = document.createElement('div'); d.style.marginTop = '4px'; pc.appendChild(d); busPaintUI(d, true); } } catch (e) { console.warn('busPaintUI', e); }
+
+/* ---- デカール (ステッカー): プレイヤーが自由に貼る ----
+   5つの面 (0 左側 = 乗り口の側 +x、1 右側、2 前、3 後ろ、4 屋根) を1枚の canvas に並べ、編集したときだけ描き直す (毎フレームは描かない)。
+   シェーダー (busPaintMat の busDecal) がバスの座標と面の向きでこの canvas を引く。窓は車体からくり抜いてあるので、窓の上には貼られない (窓を避ける)。
+   面の座標: u = 外から見て左から右 (m)、v = 下から上 (m)。屋根は前を右にして上から見る。
+   ゲーム側で用意する形に実在のロゴ・社名は入れない。読み込んだ画像は端末の中だけ (縮めて localStorage に入れる、どこにも送らない) */
+const DECAL_SHAPES = (() => {
+  const star = (n, r0, r1) => { let s = ''; for (let i = 0; i < n * 2; i++) { const a = -Math.PI / 2 + i * Math.PI / n, r = i % 2 ? r1 : r0; s += (i ? 'L' : 'M') + (50 + Math.cos(a) * r).toFixed(1) + ' ' + (50 + Math.sin(a) * r).toFixed(1); } return s + 'Z'; };
+  const sun = () => { let s = 'M50 22A28 28 0 1 1 49.9 22Z'; for (let i = 0; i < 12; i++) { const a = i * Math.PI / 6, c = Math.cos(a), d = Math.sin(a), e = Math.cos(a + 0.12), f = Math.sin(a + 0.12), g = Math.cos(a - 0.12), h = Math.sin(a - 0.12);
+    s += `M${(50 + g * 34).toFixed(1)} ${(50 + h * 34).toFixed(1)}L${(50 + c * 49).toFixed(1)} ${(50 + d * 49).toFixed(1)}L${(50 + e * 34).toFixed(1)} ${(50 + f * 34).toFixed(1)}Z`; } return s; };
+  return {
+    stripe: { n: '帯', w: 1000, h: 60, d: 'M0 0H1000V60H0Z' },
+    line2: { n: '2本線', w: 1000, h: 70, d: 'M0 0H1000V24H0Z M0 46H1000V70H0Z' },
+    swoosh: { n: 'スウッシュ', w: 1000, h: 130, d: 'M0 112C320 112 700 70 1000 0L1000 34C700 96 330 130 0 130Z' },
+    chevron: { n: '矢羽', w: 100, h: 100, d: 'M0 0H40L90 50L40 100H0L50 50Z' },
+    star: { n: '星', w: 100, h: 100, d: star(5, 50, 20) },
+    circle: { n: '丸', w: 100, h: 100, d: 'M50 0A50 50 0 1 1 49.9 0Z' },
+    ring: { n: '輪', w: 100, h: 100, d: 'M50 0A50 50 0 1 1 49.9 0Z M50 18A32 32 0 1 0 50.1 18Z', rule: 'evenodd' },
+    heart: { n: 'ハート', w: 100, h: 92, d: 'M50 92C20 70 0 52 0 30C0 13 13 2 28 2C39 2 46 8 50 17C54 8 61 2 72 2C87 2 100 13 100 30C100 52 80 70 50 92Z' },
+    bolt: { n: '稲妻', w: 80, h: 100, d: 'M50 0L8 56H36L26 100L74 38H46L58 0Z' },
+    flame: { n: '炎', w: 100, h: 100, d: 'M50 100C20 100 5 80 8 58C10 42 22 34 24 18C34 28 36 40 34 50C42 40 46 22 40 0C62 14 78 36 80 58C82 52 80 44 76 38C90 50 95 66 92 78C88 92 72 100 50 100Z' },
+    wave: { n: '波', w: 200, h: 60, d: 'M0 30Q25 0 50 30T100 30T150 30T200 30V60H0Z' },
+    leaf: { n: '葉', w: 100, h: 100, d: 'M8 92C8 42 40 10 96 4C92 60 60 92 8 92Z' },
+    mikan: { n: 'みかん', w: 100, h: 100, d: 'M50 16A42 42 0 1 1 49.9 16Z', extra: [['#3f8f3a', 'M50 18C52 6 62 0 76 2C72 14 62 20 50 18Z'], ['rgba(255,255,255,0.35)', 'M30 36A10 7 -30 1 1 29.9 36Z']] },
+    sun: { n: '太陽', w: 100, h: 100, d: sun() },
+    tri: { n: '三角', w: 100, h: 88, d: 'M50 0L100 88H0Z' },
+    diamond: { n: 'ひし形', w: 100, h: 100, d: 'M50 0L100 50L50 100L0 50Z' } };
+})();
+const DECAL_FONTS = [['900 X "Zen Kaku Gothic New", sans-serif', 'ゴシック 太'], ['700 X serif', '明朝'], ['italic 800 X sans-serif', '斜体'], ['700 X monospace', '等幅'], ['800 X "Arial Rounded MT Bold", "Hiragino Maru Gothic ProN", sans-serif', '丸']];
+const FACE_NAMES = ['左側 (乗り口)', '右側', '前', '後ろ', '屋根'];
+const BUS_DECAL = {
+  list: [], sel: -1, editing: false, cv: null, ctx: null, tex: null, R: [], ppm: 100, imgs: new Map(), saveErr: '',
+  dims() { const U = BUS_PAINT.u, a = U.uBMin.value, b = U.uBMax.value, e = new THREE.Vector3().subVectors(b, a); return [[e.z, e.y], [e.z, e.y], [e.x, e.y], [e.x, e.y], [e.z, e.x]]; },
+  layout() {   /* canvas (PC 2048×1024、スマホ 1024×512) に5つの面を並べる */
+    if (!this.cv) { const W = MOB ? 1024 : 2048, H = W / 2; this.cv = document.createElement('canvas'); this.cv.width = W; this.cv.height = H; this.ctx = this.cv.getContext('2d');
+      this.tex = new THREE.CanvasTexture(this.cv); this.tex.colorSpace = THREE.SRGBColorSpace; this.tex.anisotropy = MOB ? 2 : 4; BUS_PAINT.u.uDec.value = this.tex; }
+    const W = this.cv.width, H = this.cv.height, D = this.dims(), ez = D[0][0], ey = D[0][1], ex = D[2][0], ppm = this.ppm = Math.floor(Math.min((W - 8) / (ez + 2 * ex), (H - 8) / (2 * ey + ex)));
+    const at = [[0, 0], [0, ey * ppm + 3], [ez * ppm + 3, 0], [(ez + ex) * ppm + 6, 0], [0, 2 * ey * ppm + 6]];
+    this.R = D.map(([w, h], f) => ({ x: at[f][0], y: at[f][1], w: w * ppm, h: h * ppm, mw: w, mh: h }));
+    this.R.forEach((r, f) => BUS_PAINT.u.uDF.value[f].set(r.x / W, 1 - (r.y + r.h) / H, r.w / W, r.h / H));
+    this.draw();
+  },
+  aspect(d) { if (d.k === 'shape') { const s = DECAL_SHAPES[d.s] || DECAL_SHAPES.star; return s.w / s.h; }
+    if (d.k === 'text') { const c = this.ctx; c.font = (DECAL_FONTS[d.font || 0] || DECAL_FONTS[0])[0].replace('X', '100px'); return Math.max(0.2, c.measureText(d.t || ' ').width / 100); }
+    const im = this.imgs.get(d.img); return im && im.width ? im.width / im.height : 1; },
+  img(src) { let im = this.imgs.get(src); if (!im) { im = new Image(); im.onload = () => this.draw(); im.src = src; this.imgs.set(src, im); } return im; },
+  draw() {   /* 全部を描き直す (編集したときだけ) */
+    const c = this.ctx; if (!c) return; c.clearRect(0, 0, this.cv.width, this.cv.height);
+    this.list.forEach((d, i) => { const r = this.R[d.face]; if (!r) return; const p = this.ppm, H = d.h * p, W = H * this.aspect(d);
+      c.save(); c.beginPath(); c.rect(r.x, r.y, r.w, r.h); c.clip(); c.translate(r.x + d.u * p, r.y + r.h - d.v * p); c.rotate(-(d.rot || 0) * Math.PI / 180); if (d.flip) c.scale(-1, 1);
+      if (d.k === 'shape') { const s = DECAL_SHAPES[d.s] || DECAL_SHAPES.star; c.save(); c.translate(-W / 2, -H / 2); c.scale(W / s.w, H / s.h); c.fillStyle = d.col || (d.s === 'mikan' ? '#f39a1e' : '#ff7a1a'); c.fill(new Path2D(s.d), s.rule || 'nonzero'); for (const [ec, ed] of s.extra || []) { c.fillStyle = ec; c.fill(new Path2D(ed)); } c.restore(); }
+      else if (d.k === 'text') { c.font = (DECAL_FONTS[d.font || 0] || DECAL_FONTS[0])[0].replace('X', Math.max(4, H) + 'px'); c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = d.col || '#ffffff'; c.fillText(d.t || '', 0, H * 0.04); }
+      else { const im = this.img(d.img); if (im.complete && im.width) c.drawImage(im, -W / 2, -H / 2, W, H); }
+      if (this.editing && i === this.sel) { c.setLineDash([Math.max(3, p * 0.06), Math.max(3, p * 0.04)]); c.lineWidth = Math.max(2, p * 0.025); c.strokeStyle = '#ff2fa8'; c.strokeRect(-W / 2 - 3, -H / 2 - 3, W + 6, H + 6); }
+      c.restore(); });
+    if (this.tex) this.tex.needsUpdate = true; BUS_PAINT.u.uDecOn.value = this.list.length || this.editing ? 1 : 0;
+  },
+  save() { try { localStorage.setItem('mcr_busDecals', JSON.stringify(this.list)); this.saveErr = ''; return true; } catch (e) { this.saveErr = '保存できる量を超えました。読み込んだ画像を減らすか、小さくしてください (ほかの設定は保存されています)'; return false; } },
+  load() { try { const a = JSON.parse(localStorage.getItem('mcr_busDecals') || '[]'); if (Array.isArray(a)) this.list = a.filter(d => d && d.k && d.face >= 0 && d.face < 5); } catch (e) {} },
+  add(d) { const f = d.face != null ? d.face : GARAGE.face(), r = this.R[f]; const q = Object.assign({ face: f, u: r ? r.mw / 2 : 1, v: r ? r.mh / 2 : 1, h: 0.5, rot: 0, col: '#ff7a1a', flip: false }, d, { face: f }); this.list.push(q); this.sel = this.list.length - 1; this.draw(); this.save(); GARAGE.sync(); },
+  pick(f, u, v) {   /* その点にある一番上のデカール */
+    for (let i = this.list.length - 1; i >= 0; i--) { const d = this.list[i]; if (d.face !== f) continue; const a = -(d.rot || 0) * Math.PI / 180, du = u - d.u, dv = -(v - d.v), x = du * Math.cos(-a) - dv * Math.sin(-a), y = du * Math.sin(-a) + dv * Math.cos(-a);
+      if (Math.abs(x) <= d.h * this.aspect(d) / 2 + 0.05 && Math.abs(y) <= d.h / 2 + 0.05) return i; } return -1; },
+  open() { GARAGE.open(); }
+};
+BUS_DECAL.load();
+
+/* ガレージ: メニューの「バスの塗装」から入る。バスをぐるっと回して見ながら、塗装とデカールを編集する (メインのレンダラーで、カメラをバスのまわりに置く) */
+const GARAGE = { on: false, az: 0.9, el: 0.18, dist: 11, drag: null, el0: null, cam0: null, ray: new THREE.Raycaster(), hid: [] };
+GARAGE.face = () => { const a = ((GARAGE.az % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI); if (GARAGE.el > 0.95) return 4; const k = Math.round(a / (Math.PI / 2)) % 4; return [2, 0, 3, 1][k]; };
+GARAGE.view = f => { const A = [Math.PI / 2, -Math.PI / 2, 0, Math.PI, 0.6]; GARAGE.az = A[f]; GARAGE.el = f === 4 ? 1.15 : 0.12; GARAGE.dist = f >= 2 && f < 4 ? 8.5 : f === 4 ? 13 : 14; };
+function garageFrame(dt) {
+  if (!car) return; car.visible = true; if (car.userData.cabHide) { car.userData.cabHide = false; car.traverse(o => { if (o.isMesh) o.visible = !o.userData.off; }); }
+  camera.children.forEach(k => k.visible = false); car.updateMatrixWorld(true);
+  const t = car.localToWorld(new THREE.Vector3(0, 1.25, 0)), o = new THREE.Vector3(Math.sin(GARAGE.az) * Math.cos(GARAGE.el), Math.sin(GARAGE.el), Math.cos(GARAGE.az) * Math.cos(GARAGE.el)).multiplyScalar(GARAGE.dist).applyQuaternion(car.quaternion);
+  camera.position.copy(t).add(o); camera.lookAt(t); camera.fov = 45; camera.near = Math.max(0.3, GARAGE.dist - 5.8);   /* カメラとバスの間の壁・柱は写さない */
+  /* 編集のパネル (右、狭い画面では下) に隠れないように、絵の中心をパネルの分だけずらす */
+  const cv = renderer.domElement, cw = cv.clientWidth, ch = cv.clientHeight, P = GARAGE.dom;
+  if (P && !P.hidden && cw && ch) { const pw = P.offsetWidth, ph = P.offsetHeight; if (pw < cw * 0.9) camera.setViewOffset(cw, ch, pw / 2, 0, cw, ch); else camera.setViewOffset(cw, ch, 0, ph / 2, cw, ch); }
+  camera.updateProjectionMatrix();
+}
+GARAGE.hit = (ev) => {   /* 画面の点 → バスの面と面の座標 (u, v) */
+  const r = renderer.domElement.getBoundingClientRect(), nd = new THREE.Vector2((ev.clientX - r.left) / r.width * 2 - 1, -(ev.clientY - r.top) / r.height * 2 + 1); GARAGE.ray.setFromCamera(nd, camera);
+  const ms = []; car.traverse(o => { if (o.isMesh && o.visible && o.name !== 'busglass' && o.material && o.material.onBeforeCompile && BUS_PAINT.mats.includes(o.material)) ms.push(o); });
+  const h = GARAGE.ray.intersectObjects(ms, false)[0]; if (!h || !h.face) return null;
+  const p = car.worldToLocal(h.point.clone()), n = h.face.normal.clone().applyMatrix3(new THREE.Matrix3().getNormalMatrix(h.object.matrixWorld)).applyQuaternion(car.quaternion.clone().invert()).normalize();
+  const U = BUS_PAINT.u, a = U.uBMin.value, b = U.uBMax.value; let f, u, v;
+  if (n.y < -0.6) return null; if (n.y > 0.6) { f = 4; u = p.z - a.z; v = p.x - a.x; } else if (Math.abs(n.x) >= Math.abs(n.z)) { if (n.x > 0) { f = 0; u = b.z - p.z; } else { f = 1; u = p.z - a.z; } v = p.y - a.y; } else { if (n.z > 0) { f = 2; u = p.x - a.x; } else { f = 3; u = b.x - p.x; } v = p.y - a.y; }
+  return { f, u, v };
+};
+GARAGE.open = () => {
+  if (GARAGE.on || !car) return; GARAGE.on = true; BUS_DECAL.editing = true; BUS_DECAL.draw();
+  GARAGE.cam0 = { p: camera.position.clone(), q: camera.quaternion.clone(), fov: camera.fov }; GARAGE.vis0 = car.visible; GARAGE.near0 = camera.near; renderer.domElement.style.touchAction = 'none'; GARAGE.hid = ['menu', 'pause'].map(id => document.getElementById(id)).filter(e => e && !e.hidden); GARAGE.hid.forEach(e => e.hidden = true);
+  let el = document.getElementById('garage'); if (!el) { el = GARAGE.build(); } el.hidden = false; GARAGE.view(0); GARAGE.sync();
+};
+GARAGE.close = () => {
+  GARAGE.on = false; BUS_DECAL.editing = false; BUS_DECAL.sel = -1; BUS_DECAL.draw(); BUS_DECAL.save(); const el = document.getElementById('garage'); if (el) el.hidden = true;
+  GARAGE.hid.forEach(e => e.hidden = false); if (GARAGE.cam0) { camera.position.copy(GARAGE.cam0.p); camera.quaternion.copy(GARAGE.cam0.q); camera.fov = GARAGE.cam0.fov; camera.near = GARAGE.near0; camera.clearViewOffset(); camera.updateProjectionMatrix(); } renderer.domElement.style.touchAction = '';
+  if (car) car.visible = GARAGE.vis0;   /* バスの見え方は開く前のまま */
+};
+GARAGE.build = () => {
+  const el = document.createElement('div'); el.id = 'garage'; el.hidden = true;
+  el.innerHTML = `<style>
+#garage{position:fixed;z-index:60;top:0;right:0;bottom:0;width:min(360px,100%);overflow:auto;background:rgba(14,18,24,.88);color:#eee;font-size:13px;padding:12px 14px;box-sizing:border-box;-webkit-overflow-scrolling:touch}
+#garage h2{margin:0 0 4px;font-size:18px}#garage .gsec{margin:10px 0 4px;font-size:11px;letter-spacing:.08em;color:#9fb3c8}
+#garage button{font-size:12px;padding:4px 8px;margin:2px}#garage .gshapes{display:flex;flex-wrap:wrap;gap:2px}#garage .gshapes button{width:42px;height:42px;padding:2px}
+#garage label.gs{display:grid;grid-template-columns:66px 1fr;align-items:center;gap:6px;margin:3px 0}#garage input[type=range]{width:100%}#garage .gmsg{color:#ffb35c;min-height:1em;margin:4px 0}
+#garage .gtip{color:#9aa;font-size:11px}
+@media (max-width:700px){#garage{top:auto;left:0;width:100%;height:46%}}
+</style>
+<h2>ガレージ</h2><div class="gtip">バスをドラッグで回す (ホイールで近く・遠く)。貼ったデカールはドラッグで動かす</div>
+<div class="gpaint"></div>
+<div class="gsec">見る面 / 貼る面</div><div class="gfaces"></div>
+<div class="gsec">形を貼る</div><div class="gshapes"></div>
+<div class="gsec">文字を貼る</div><div><input class="gtext" maxlength="24" placeholder="文字 (例: 7、SUNNY、夏)" style="width:150px"> <select class="gfont"></select> <button class="gaddt">貼る</button></div>
+<div class="gsec">画像を貼る (この端末の中だけで使います)</div><div><input type="file" class="gfile" accept="image/png,image/jpeg,image/webp"></div>
+<div class="gsel"><div class="gsec">選んでいるデカール</div>
+<label class="gs">横<input type="range" class="gu" step="0.01"></label><label class="gs">縦<input type="range" class="gv" step="0.01"></label>
+<label class="gs">大きさ<input type="range" class="gh" min="0.05" max="3" step="0.01"></label><label class="gs">回転<input type="range" class="gr" min="-180" max="180" step="1"></label>
+<label class="gs">色<input type="color" class="gc"></label><label class="gs">左右反転<input type="checkbox" class="gf" style="justify-self:start"></label>
+<div><button class="gup">前へ</button><button class="gdn">後ろへ</button><button class="gdup">複製</button><button class="gdel">消す</button></div></div>
+<div class="gmsg"></div>
+<div style="margin-top:8px"><button class="go gdone" style="font-size:14px;padding:6px 18px">完了</button> <button class="gclear">デカールを全部消す</button></div>`;
+  document.body.appendChild(el); const $q = s => el.querySelector(s);
+  el.addEventListener('keydown', e => e.stopPropagation());   /* 文字を打っている間にゲームのキー (Enter で開始など) が効かないように */
+  busPaintUI($q('.gpaint'), false);
+  FACE_NAMES.forEach((n, f) => { const b = document.createElement('button'); b.textContent = n; b.onclick = () => GARAGE.view(f); $q('.gfaces').appendChild(b); });
+  for (const [k, s] of Object.entries(DECAL_SHAPES)) { const b = document.createElement('button'); b.title = s.n; const c = document.createElement('canvas'); c.width = c.height = 36; const g = c.getContext('2d'), sc = 30 / Math.max(s.w, s.h);
+    g.translate(18 - s.w * sc / 2, 18 - s.h * sc / 2); g.scale(sc, sc); g.fillStyle = '#ffb347'; g.fill(new Path2D(s.d), s.rule || 'nonzero'); for (const [ec, ed] of s.extra || []) { g.fillStyle = ec; g.fill(new Path2D(ed)); } b.appendChild(c);
+    b.onclick = () => BUS_DECAL.add({ k: 'shape', s: k, h: s.w / s.h > 4 ? 0.22 : 0.6, col: k === 'mikan' ? '#f39a1e' : '#ff7a1a' }); $q('.gshapes').appendChild(b); }
+  DECAL_FONTS.forEach(([, n], i) => { const o = document.createElement('option'); o.value = i; o.textContent = n; $q('.gfont').appendChild(o); });
+  $q('.gaddt').onclick = () => { const t = $q('.gtext').value.trim(); if (t) BUS_DECAL.add({ k: 'text', t, font: +$q('.gfont').value, h: 0.4, col: '#1d2a3a' }); };
+  $q('.gfile').onchange = e => { const fl = e.target.files && e.target.files[0]; if (!fl) return; const rd = new FileReader(); rd.onload = () => { const im = new Image(); im.onload = () => {
+      const mx = MOB ? 160 : 256, s = Math.min(1, mx / Math.max(im.width, im.height)), c = document.createElement('canvas'); c.width = Math.max(1, Math.round(im.width * s)); c.height = Math.max(1, Math.round(im.height * s)); c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+      const url = c.toDataURL('image/png'); BUS_DECAL.add({ k: 'img', img: url, h: 0.8 }); GARAGE.msg(BUS_DECAL.saveErr); }; im.src = rd.result; }; rd.readAsDataURL(fl); e.target.value = ''; };
+  const cur = () => BUS_DECAL.list[BUS_DECAL.sel], upd = () => { BUS_DECAL.draw(); BUS_DECAL.save(); GARAGE.msg(BUS_DECAL.saveErr); };
+  $q('.gu').oninput = e => { const d = cur(); if (d) { d.u = +e.target.value; upd(); } }; $q('.gv').oninput = e => { const d = cur(); if (d) { d.v = +e.target.value; upd(); } };
+  $q('.gh').oninput = e => { const d = cur(); if (d) { d.h = +e.target.value; upd(); } }; $q('.gr').oninput = e => { const d = cur(); if (d) { d.rot = +e.target.value; upd(); } };
+  $q('.gc').oninput = e => { const d = cur(); if (d) { d.col = e.target.value; upd(); } }; $q('.gf').onchange = e => { const d = cur(); if (d) { d.flip = e.target.checked; upd(); } };
+  const mv = k => { const L = BUS_DECAL.list, i = BUS_DECAL.sel, j = i + k; if (i < 0 || j < 0 || j >= L.length) return; [L[i], L[j]] = [L[j], L[i]]; BUS_DECAL.sel = j; upd(); GARAGE.sync(); };
+  $q('.gup').onclick = () => mv(1); $q('.gdn').onclick = () => mv(-1);
+  $q('.gdup').onclick = () => { const d = cur(); if (d) BUS_DECAL.add(Object.assign({}, d, { u: d.u + 0.3, v: d.v - 0.1 })); };
+  $q('.gdel').onclick = () => { if (BUS_DECAL.sel >= 0) { BUS_DECAL.list.splice(BUS_DECAL.sel, 1); BUS_DECAL.sel = -1; upd(); GARAGE.sync(); } };
+  $q('.gclear').onclick = () => { if (confirm('貼ったデカールを全部消しますか？')) { BUS_DECAL.list = []; BUS_DECAL.sel = -1; upd(); GARAGE.sync(); } };
+  $q('.gdone').onclick = () => GARAGE.close();
+  GARAGE.dom = el; return el;
+};
+GARAGE.msg = t => { if (GARAGE.dom) GARAGE.dom.querySelector('.gmsg').textContent = t || ''; };
+GARAGE.sync = () => { const el = GARAGE.dom; if (!el) return; const d = BUS_DECAL.list[BUS_DECAL.sel], s = el.querySelector('.gsel'); s.style.opacity = d ? 1 : 0.4; s.style.pointerEvents = d ? '' : 'none'; if (!d) return;
+  const r = BUS_DECAL.R[d.face]; const set = (c, v, a, b) => { const i = el.querySelector(c); if (a != null) { i.min = a; i.max = b; } i.value = v; };
+  set('.gu', d.u, 0, r ? r.mw : 10); set('.gv', d.v, 0, r ? r.mh : 3); set('.gh', d.h); set('.gr', d.rot || 0); set('.gc', d.col || '#ffffff'); el.querySelector('.gf').checked = !!d.flip;
+  el.querySelector('.gc').disabled = d.k === 'img'; s.querySelector('.gsec').textContent = '選んでいるデカール (' + FACE_NAMES[d.face] + ')'; };
+/* 画面の上のドラッグ: デカールの上なら動かす (別の面へも)、それ以外はバスを回す。ホイールで近く・遠く。指でも */
+addEventListener('pointerdown', e => { if (!GARAGE.on || e.target !== renderer.domElement) return; const h = GARAGE.hit(e); let i = h ? BUS_DECAL.pick(h.f, h.u, h.v) : -1;
+  if (i >= 0) { const d = BUS_DECAL.list[i]; BUS_DECAL.sel = i; GARAGE.drag = { k: 'decal', du: d.u - h.u, dv: d.v - h.v, f: h.f }; BUS_DECAL.draw(); GARAGE.sync(); }
+  else GARAGE.drag = { k: 'orbit', x: e.clientX, y: e.clientY };
+  e.stopPropagation(); }, true);
+addEventListener('pointermove', e => { const g = GARAGE.drag; if (!GARAGE.on || !g) return;
+  if (g.k === 'orbit') { GARAGE.az -= (e.clientX - g.x) * 0.008; GARAGE.el = THREE.MathUtils.clamp(GARAGE.el + (e.clientY - g.y) * 0.006, -0.05, 1.35); g.x = e.clientX; g.y = e.clientY; }
+  else { const h = GARAGE.hit(e), d = BUS_DECAL.list[BUS_DECAL.sel]; if (h && d) { if (h.f !== g.f) { g.f = h.f; g.du = 0; g.dv = 0; } d.face = h.f; d.u = h.u + g.du; d.v = h.v + g.dv; BUS_DECAL.draw(); GARAGE.sync(); } }
+  e.stopPropagation(); }, true);
+addEventListener('pointerup', e => { if (GARAGE.drag && GARAGE.drag.k === 'decal') { BUS_DECAL.save(); GARAGE.msg(BUS_DECAL.saveErr); } GARAGE.drag = null; }, true);
+addEventListener('wheel', e => { if (!GARAGE.on) return; GARAGE.dist = THREE.MathUtils.clamp(GARAGE.dist * (e.deltaY > 0 ? 1.08 : 0.93), 4, 22); }, { passive: true });
+window.__decal = { D: BUS_DECAL, G: GARAGE, shapes: DECAL_SHAPES };   /* テスト用 */
+
 /* 自分のバスの車内 (窓から少し見える): 床・青い座席の列・握り棒・天井 */
 function busInterior(bb, floorW = 1e9) {
   const W = bb.max.x - bb.min.x, cx = (bb.min.x + bb.max.x) / 2, z0 = bb.min.z + 0.9, z1 = bb.max.z - 1.6, y0 = bb.min.y, gs = [], gs2 = [];
@@ -3735,18 +4003,20 @@ function prepareCar(model, ghost) {
   const b2 = new THREE.Box3().setFromObject(m); m.position.y -= b2.min.y; m.position.x -= (b2.min.x + b2.max.x) / 2; m.position.z -= (b2.min.z + b2.max.z) / 2;
   root.add(m);
   const ghostMat = new THREE.MeshStandardMaterial({ color: 0x8fd0ff, transparent: true, opacity: 0.32, depthWrite: false });
-  let tex = null; const glassAdd = [];
+  let tex = null; const glassAdd = []; root.updateMatrixWorld(true);
   m.traverse(o => {
     if (!o.isMesh) return;
     if (!o.geometry.attributes.normal) o.geometry.computeVertexNormals();
     o.castShadow = !ghost; o.receiveShadow = !ghost;
     if (ghost) { o.material = ghostMat; return; }
     if (model.userData.realBus) { const mp0 = o.material.map, mp = model.userData.busDoors && !ghost ? busDoorCut(mp0, model.userData.busDoors) : mp0, gt = busGlassTex(mp);   /* 扉の所は車体から抜く (扉は別の部品) */ o.material = new THREE.MeshPhysicalMaterial({ map: mp, roughness: 0.45, metalness: 0.05, clearcoat: 0.3, clearcoatRoughness: 0.32, envMapIntensity: 0.5,   /* つやは控えめ: 強いクリアコートだと、浅い角度で見る屋根や側面が空を映して白く飛んでいた */ alphaTest: gt ? 0.8 : 0 });
+      busPaintMat(o.material, busPaintMask(mp0), new THREE.Matrix4().copy(root.matrixWorld).invert().multiply(o.matrixWorld));   /* 塗装 (プレイヤーが選んだ色) */
       if (gt) glassAdd.push([o, new THREE.MeshPhysicalMaterial({ map: gt, transparent: true, depthWrite: false, roughness: 0.05, metalness: 0.2, clearcoat: 0.6, clearcoatRoughness: 0.05, envMapIntensity: 0.9 })]); return; }   /* 実車モデルは塗り直したテクスチャのまま。窓 (テクスチャのアルファが 150) は車体からくり抜き、同じ形の透けるガラスの層を重ねる: 少し透けて車内が見え、空が映る */
     if (o.material.map && o.material.map.image) { tex = tex || busTexture(o.material.map.image); }
     o.material = new THREE.MeshPhysicalMaterial({ map: tex, roughness: 0.38, metalness: 0.15, clearcoat: 0.8, clearcoatRoughness: 0.15, envMapIntensity: 1.0 });
   });
   for (const [o, gm] of glassAdd) { const q = new THREE.Mesh(o.geometry, gm); q.name = 'busglass'; q.renderOrder = 2; o.add(q); }   /* 窓ガラスの層 (車体と同じ形・同じ位置) */
+  if (model.userData.realBus && !ghost) { const bb = new THREE.Box3().setFromObject(m); BUS_PAINT.u.uBMin.value.copy(bb.min); BUS_PAINT.u.uBMax.value.copy(bb.max); BUS_DECAL.layout(); }   /* デカールの面の大きさ = 車体の大きさ */
   // destination sign on the front
   if (!ghost) {
     const sgn = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 0.3), new THREE.MeshBasicMaterial({ map: textTexture(['松山市駅'], 512, 96, '#111', '#ffb000') }));
@@ -3795,13 +4065,15 @@ function prepareCar(model, ghost) {
          開け閉めは路線運行 (busops) と運転 (behavior) の S.doorF / S.doorM (0〜1) で updateCarLights が動かす */
       const D = model.userData.busDoors;
       if (D && !ghost) { let bm = null; m.traverse(o => { if (!bm && o.isMesh && o.material && o.material.map && o.material.map.userData && o.material.map.userData.orig) bm = o.material; });
-        if (bm) { const dm = bm.clone(); dm.map = bm.map.userData.orig; const gtx = busGlassTex(dm.map), gm = gtx ? new THREE.MeshPhysicalMaterial({ map: gtx, transparent: true, depthWrite: false, roughness: 0.04, metalness: 0.3, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.6 }) : null;
+        if (bm) { const dm = bm.clone(); dm.map = bm.map.userData.orig; busPaintMat(dm, busPaintMask(dm.map), new THREE.Matrix4());   /* 扉の板も同じ塗装 (板の座標はバスの座標から蝶番を引いたもの、蝶番の高さは 0) */ const gtx = busGlassTex(dm.map), gm = gtx ? new THREE.MeshPhysicalMaterial({ map: gtx, transparent: true, depthWrite: false, roughness: 0.04, metalness: 0.3, clearcoat: 1, clearcoatRoughness: 0.03, envMapIntensity: 1.6 }) : null;
           root.updateMatrixWorld(true); const doors = {};
           for (const k of ['front', 'mid']) { if (!D[k]) continue; const tris = busDoorTris(m, D[k], D); if (!tris.length) continue;
             let z0 = 1e9, z1 = -1e9, x = 0; for (const t of tris) for (let j = 0; j < 3; j++) { z0 = Math.min(z0, t.P[j * 3 + 2]); z1 = Math.max(z1, t.P[j * 3 + 2]); x += t.P[j * 3]; } x /= tris.length * 3;
             if (k === 'front') { const zm = (z0 + z1) / 2, A = busDoorLeaf(tris, zm, z1 + 0.01, new THREE.Vector3(x, 0, z1), dm, gm), B = busDoorLeaf(tris, z0 - 0.01, zm, new THREE.Vector3(x, 0, z0), dm, gm); root.add(A, B); doors.F = { A, B, s: Math.sign(x) || 1 }; }
             else { const P = busDoorLeaf(tris, z0 - 0.01, z1 + 0.01, new THREE.Vector3(x, 0, (z0 + z1) / 2), dm, gm); root.add(P); doors.M = { P, w: z1 - z0, s: Math.sign(x) || 1, z0: P.position.z, x0: P.position.x }; } }
-          root.userData.busDoors = doors; } }
+          root.userData.busDoors = doors;
+          /* 扉の板ごとに材質を分け、板の座標 (蝶番から見た座標) → バスの座標 (閉めた位置) を渡す: 塗装とデカールが車体とつながり、開けると板と一緒に動く */
+          for (const L of [doors.F && doors.F.A, doors.F && doors.F.B, doors.M && doors.M.P]) if (L) L.traverse(q => { if (q.isMesh && q.name !== 'busglass') { q.material = dm.clone(); busPaintMat(q.material, busPaintMask(dm.map), new THREE.Matrix4().makeTranslation(L.position.x, L.position.y, L.position.z)); } }); } }
       root.userData.wheels = wheels; root.userData.real = true; return root; } }
   // 回る・切れるタイヤ (元のモデルはタイヤが車体と一体なので、その上にかぶせる)
   { const wheels = []; const tireM = ghost ? ghostMat : new THREE.MeshStandardMaterial({ color: 0x18191b, roughness: 0.85 }), hubM = ghost ? ghostMat : new THREE.MeshStandardMaterial({ color: 0xb9bdc1, metalness: 0.7, roughness: 0.35 });
@@ -6193,20 +6465,20 @@ async function buildGrass() {
   try { const r = await fetch('ground.dat.wasm'); if (r.ok) { const gr = await gunzip(new Uint8Array(await r.arrayBuffer())); const dv = new DataView(gr.buffer, gr.byteOffset); GRASS.CW = dv.getUint32(0, true); GRASS.CH = dv.getUint32(4, true); GRASS.cls = gr.subarray(8, 8 + GRASS.CW * GRASS.CH); } }
   catch (e) { console.warn('grass: ground.dat.wasm', e); }
   /* 決まった線に沿う草 (中央分離帯・空き地や駐車場の縁・フェンスと電柱の根元・お堀の土手の縁) を升目ごとにためておく */
-  const T = GRASS.T, rnd = fzRand(9091), put = (x, y, z, k, p = 1) => { if (rnd() > p) return; const key = Math.floor(x / T) + ',' + Math.floor(z / T); if (!GRASS.extra.has(key)) GRASS.extra.set(key, []); GRASS.extra.get(key).push(x, y, z, k); };
+  const T = GRASS.T, rnd = fzRand(9091), put = (x, y, z, k, p = 1, sun = 0) => { if (rnd() > p) return; const key = Math.floor(x / T) + ',' + Math.floor(z / T); if (!GRASS.extra.has(key)) GRASS.extra.set(key, []); GRASS.extra.get(key).push(x, y, z, k, sun); };   /* sun: 日なたで乾いた色にする強さ (0..1) */
   const line = (ax, az, bx, bz, step, f) => { const L = Math.hypot(bx - ax, bz - az); for (let s = rnd() * step; s < L; s += step * (0.6 + rnd() * 0.8)) f(ax + (bx - ax) * s / L, az + (bz - az) * s / L, (bx - ax) / L, (bz - az) / L); };
   /* 平和通りの中央分離帯 (buildMedianAndBridges の HEIWA_MED: 縁石で囲った高い植え込みの上、草の面は地面 + 0.46m): 夏草が茂る */
   for (const m of typeof HEIWA_MED !== 'undefined' ? HEIWA_MED : []) { const L = Math.hypot(m.dx, m.dz) || 1, dx = m.dx / L, dz = m.dz / L, hw = m.w / 2 - 0.35;
-    for (let s = -L / 2; s < L / 2; s += 0.6) for (let o = -hw; o <= hw; o += 0.6) { const x = m.x + dx * s + dz * o + (rnd() - 0.5) * 0.3, z = m.z + dz * s - dx * o + (rnd() - 0.5) * 0.3; put(x, groundAt(m.x, m.z) + 0.44, z, rnd() < 0.55 ? 0 : rnd() < 0.7 ? 1 : 2, 0.8); } }
+    for (let s = -L / 2; s < L / 2; s += 0.6) for (let o = -hw; o <= hw; o += 0.6) { const x = m.x + dx * s + dz * o + (rnd() - 0.5) * 0.3, z = m.z + dz * s - dx * o + (rnd() - 0.5) * 0.3; put(x, groundAt(m.x, m.z) + 0.44, z, rnd() < 0.2 ? 0 : rnd() < 0.6 ? 1 : 2, 0.85, 0.85); } }   /* ストリートビュー 2025-06/07: 分離帯の草は乾いた黄緑と麦わら色 */
   /* 空き地・駐車場 (LOTS): 縁にそって雑草、土と砂利の面にはまばらに */
   for (const L of typeof LOTS !== 'undefined' ? LOTS : []) for (const [kind, P] of L.s || []) {
-    for (let i = 0; i < P.length; i++) { const [ax, az] = P[i], [bx, bz] = P[(i + 1) % P.length]; line(ax, az, bx, bz, 0.9, (x, z, dx, dz) => { const o = 0.15 + rnd() * 0.35; for (const sg of [1, -1]) { const px = x + dz * o * sg, pz = z - dx * o * sg; if (inPoly(px, pz, P)) put(px, groundAt(px, pz) + 0.08, pz, rnd() < 0.45 ? 2 : 1, 0.75); } }); }
-    if (kind === 'soil' || kind === 'grav' || kind === 'sand') { const xs = P.map(p => p[0]), zs = P.map(p => p[1]); for (let x = Math.min(...xs); x < Math.max(...xs); x += 1.3) for (let z = Math.min(...zs); z < Math.max(...zs); z += 1.3) { const px = x + rnd(), pz = z + rnd(); if (inPoly(px, pz, P)) put(px, groundAt(px, pz) + 0.08, pz, rnd() < 0.3 ? 2 : 1, kind === 'soil' ? 0.3 : 0.14); } }
-    for (const [fk, F] of L.f || []) if (fk !== 'hedge') for (let i = 0; i + 1 < F.length; i++) line(F[i][0], F[i][1], F[i + 1][0], F[i + 1][1], 0.8, (x, z) => put(x + (rnd() - 0.5) * 0.4, groundAt(x, z) + 0.08, z + (rnd() - 0.5) * 0.4, rnd() < 0.5 ? 2 : 1, 0.6));
+    for (let i = 0; i < P.length; i++) { const [ax, az] = P[i], [bx, bz] = P[(i + 1) % P.length]; line(ax, az, bx, bz, 0.9, (x, z, dx, dz) => { const o = 0.15 + rnd() * 0.35; for (const sg of [1, -1]) { const px = x + dz * o * sg, pz = z - dx * o * sg; if (inPoly(px, pz, P)) put(px, groundAt(px, pz) + 0.08, pz, rnd() < 0.45 ? 2 : 1, 0.75, 0.45); } }); }
+    if (kind === 'soil' || kind === 'grav' || kind === 'sand') { const xs = P.map(p => p[0]), zs = P.map(p => p[1]); for (let x = Math.min(...xs); x < Math.max(...xs); x += 1.3) for (let z = Math.min(...zs); z < Math.max(...zs); z += 1.3) { const px = x + rnd(), pz = z + rnd(); if (inPoly(px, pz, P)) put(px, groundAt(px, pz) + 0.08, pz, rnd() < 0.3 ? 2 : 1, kind === 'soil' ? 0.3 : 0.14, 0.45); } }
+    for (const [fk, F] of L.f || []) if (fk !== 'hedge') for (let i = 0; i + 1 < F.length; i++) line(F[i][0], F[i][1], F[i + 1][0], F[i + 1][1], 0.8, (x, z) => put(x + (rnd() - 0.5) * 0.4, groundAt(x, z) + 0.08, z + (rnd() - 0.5) * 0.4, rnd() < 0.5 ? 2 : 1, 0.6, 0.45));
   }
   /* 歩道の柵 (FENCE) と電柱の根元 */
-  for (const f of (typeof FENCE !== 'undefined' && FENCE.segs) || []) if (rnd() < 0.35) put(f.x + (rnd() - 0.5) * 1.6 * Math.sin(f.a), f.y - 0.06, f.z + (rnd() - 0.5) * 1.6 * Math.cos(f.a), 1, 1);
-  for (const [x, z] of GRASS.poles) for (let k = 0; k < 3; k++) { const a = rnd() * 6.283, d = 0.22 + rnd() * 0.15, px = x + Math.cos(a) * d, pz = z + Math.sin(a) * d; put(px, groundAt(x, z) + swLift(x, z), pz, k ? 1 : 2, 0.7); }
+  for (const f of (typeof FENCE !== 'undefined' && FENCE.segs) || []) if (rnd() < 0.35) put(f.x + (rnd() - 0.5) * 1.6 * Math.sin(f.a), f.y - 0.06, f.z + (rnd() - 0.5) * 1.6 * Math.cos(f.a), 1, 1, 0.6);
+  for (const [x, z] of GRASS.poles) for (let k = 0; k < 3; k++) { const a = rnd() * 6.283, d = 0.22 + rnd() * 0.15, px = x + Math.cos(a) * d, pz = z + Math.sin(a) * d; put(px, groundAt(x, z) + swLift(x, z), pz, k ? 1 : 2, 0.7, 0.55); }
   /* お堀の土手の縁 (水の外側 0.5〜3m): 背の高い夏草 */
   for (const m of moatInfo) { const P = m.P; for (let i = 0; i < P.length; i++) { const [ax, az] = P[i], [bx, bz] = P[(i + 1) % P.length]; line(ax, az, bx, bz, 0.7, (x, z, dx, dz) => { for (const sg of [1, -1]) { const o = 0.6 + rnd() * 2.4, px = x + dz * o * sg, pz = z - dx * o * sg; if (!inPoly(px, pz, P) && !onCarriageway(px, pz, 0.3) && !swFind(px, pz)) put(px, groundAt(px, pz), pz, rnd() < 0.55 ? 2 : 1, 0.8); } }); } }
   /* 石垣の線: その近くには地面の草を生やさない (石垣の面から草が突き出る) */
@@ -6232,12 +6504,12 @@ attribute vec4 aP; attribute vec4 aS; uniform float uGT; uniform float uGR; vary
   float t = position.y * position.y; float ph = aP.x * 0.21 + aP.z * 0.17;
   t *= s; p.x += t * h * (0.10 * sin(uGT * 1.6 + ph) + 0.05 * sin(uGT * 3.7 + ph * 2.3)); p.z += t * h * 0.07 * sin(uGT * 1.3 + ph * 1.4);
   transformed = aP.xyz + p;
-  float dr = fract(aS.w), br = floor(aS.w) * 0.01; vGC = mix(vec3(1.0), vec3(1.25, 1.08, 0.72), dr) * br; vGY = position.y; }`);
+  float dr = fract(aS.w), br = floor(aS.w) * 0.01; vGC = vec3(dr, br, 0.0); vGY = position.y; }`);
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vGC; varying float vGY;')
-      .replace('#include <map_fragment>', '#include <map_fragment>\n{ vec2 gx = dFdx(vMapUv * 512.0), gy = dFdy(vMapUv * 512.0); float lod = max(0.0, 0.5 * log2(max(dot(gx, gx), dot(gy, gy)))); diffuseColor.a *= 1.0 + lod * 0.45; }   /* ミップマップで葉の透明度が薄まって消えるのを防ぐ */\ndiffuseColor.rgb *= vGC * mix(0.62, 1.0, smoothstep(0.0, 0.6, vGY));')
+      .replace('#include <map_fragment>', '#include <map_fragment>\n{ vec2 gx = dFdx(vMapUv * 512.0), gy = dFdy(vMapUv * 512.0); float lod = max(0.0, 0.5 * log2(max(dot(gx, gx), dot(gy, gy)))); diffuseColor.a *= 1.0 + lod * 0.45; }   /* ミップマップで葉の透明度が薄まって消えるのを防ぐ */\n{ float gL = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11)); diffuseColor.rgb = mix(diffuseColor.rgb, gL * vec3(1.55, 1.3, 0.68), vGC.x * 0.85) * vGC.y; }   /* 枯れ具合: 明るさを保って麦わら色へ */\ndiffuseColor.rgb *= mix(0.62, 1.0, smoothstep(0.0, 0.6, vGY));')
       .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\nnormal = normalize(vNormal);');   /* 裏から見ても法線は上向き (暗くならない) */
   };
-  mat.customProgramCacheKey = () => 'grass2';
+  mat.customProgramCacheKey = () => 'grass3';
   const m = new THREE.Mesh(geo, mat); m.frustumCulled = false; m.receiveShadow = true; m.castShadow = false; m.renderOrder = 1; scene.add(m); GRASS.mesh = m; GRASS.key = ''; window.__GRASS = GRASS;
 }
 /* その点の地面の材質 (ground.dat.wasm, 1m 升目)。無ければ -1 */
@@ -6259,18 +6531,19 @@ function grassTile(tx, tz) {
   const inCastle = (x, z) => { if (Math.abs(x + 640) > 120 || Math.abs(z - 470) > 120) return false;
     for (const [, cx, cz, w, d, a] of CASTLE_BLD) { const c = Math.cos(a), s = Math.sin(a), u = (x - cx) * c - (z - cz) * s, v = (x - cx) * s + (z - cz) * c; if (Math.abs(u) < w / 2 + 0.8 && Math.abs(v) < d / 2 + 0.8) return true; }
     return CASTLE_WATER.some(P => inPoly(x, z, P)); };
-  const add = (x, y, z, k) => { const K = GRASS_KIND[k], h = K.h[0] + rnd() * (K.h[1] - K.h[0]), w = K.w[0] + rnd() * (K.w[1] - K.w[0]);
+  const add = (x, y, z, k, sun = 0) => { const K = GRASS_KIND[k], h = K.h[0] + rnd() * (K.h[1] - K.h[0]), w = K.w[0] + rnd() * (K.w[1] - K.w[0]);
     /* 夏の濃い緑と枯れた黄色: 5m くらいのまとまりで枯れ具合を変える (日当たり・踏まれ方のむら) */
-    const patch = fzRand((Math.floor(x / 5) * 9283 + Math.floor(z / 5) * 6907) >>> 0 || 3)(), dry = Math.min(0.95, rnd() < K.dry + patch * 0.25 ? 0.35 + rnd() * 0.6 : rnd() * 0.18);
+    const patch = fzRand((Math.floor(x / 5) * 9283 + Math.floor(z / 5) * 6907) >>> 0 || 3)(), dry = Math.min(0.95, rnd() < K.dry + patch * 0.25 ? 0.35 + rnd() * 0.6 : rnd() * 0.18), dry2 = sun ? Math.min(0.95, dry * (1 - sun) + sun * (0.35 + rnd() * 0.55)) : dry;   /* 真夏の日なた (道路わき・分離帯) は乾いた黄緑〜麦わら色。日陰・水の多い所 (お堀の土手・城山) は緑のまま */
     const br = Math.round(K.dark * (0.82 + rnd() * 0.3) * 100);
-    out.push(x, y, z, rnd() * 6.283, Math.round(w * 100) + Math.min(0.999, h / 4), K.cell, br + dry); };
+    out.push(x, y, z, rnd() * 6.283, Math.round(w * 100) + Math.min(0.999, h / 4), K.cell, br + dry2); };
   for (let i = 0; i < T; i++) for (let j = 0; j < T; j++) {
-    const x = x0 + i + rnd(), z = z0 + j + rnd(); let k = -1, p = 0, y = null; const castle = Math.hypot(x + 600, z - 540) < 260, garden = x > -790 && x < -750 && z > 770 && z < 805;
+    const x = x0 + i + rnd(), z = z0 + j + rnd(); let k = -1, p = 0, y = null, sun = 0; const castle = Math.hypot(x + 600, z - 540) < 260, garden = x > -790 && x < -750 && z > 770 && z < 805;
     const R = swFind(x, z);
     if (R) {   /* 高い歩道: 縁石の根元のすき間と、歩道の奥 (建物・塀ぎわ) にだけ小さい草 */
       const o = (x - R[0]) * R[4] + (z - R[1]) * R[5];
       if (R[9] && o < R[6] + 1.2) continue;   /* 植え込み (生け垣) の所は生け垣が描く */
       if (o > R[6] + 0.18 && o < R[6] + 0.45) { k = 1; p = 0.16; } else if (o > R[7] - 0.35) { k = 1; p = 0.2; } else continue;
+      sun = 0.6;
       y = R[8];
     } else {
       if (onCarriageway(x, z, 0.1)) continue;
@@ -6278,18 +6551,18 @@ function grassTile(tx, tz) {
       const edge = onCarriageway(x, z, 0.9);   /* 車道の端 (縁石の無い道の路肩・側溝のふち) */
       const sd = TS.subD(x, z);
       if (sd < 2.5 || TS.railD(x, z) < 2.6) continue;   /* 軌道の上 (道床・レールの間) には置かない */
-      if (sd < 4.8) { k = rnd() < 0.55 ? 2 : 1; p = 0.5; }   /* 郊外線の線路脇 (道床の外) */
-      else if (mt === 3) { k = 0; p = 0.85; if (rnd() < 0.08) k = 1; }   /* 芝 */
+      if (sd < 4.8) { k = rnd() < 0.55 ? 2 : 1; p = 0.5; sun = 0.5; }   /* 郊外線の線路脇 (道床の外) */
+      else if (mt === 3) { k = 0; p = 0.85; sun = 0.15; if (rnd() < 0.08) k = 1; }   /* 芝 */
       else if (mt === 5) { k = 3; p = 0.4; }    /* 植え込み */
       else if (mt === 9) { k = rnd() < 0.3 ? 2 : 3; p = 0.6; }   /* 森の下草 (城山の斜面) */
-      else if (mt === 4) { k = rnd() < 0.3 ? 2 : 1; p = 0.14; }   /* 土 */
-      else if (mt === 2) { k = 1; p = 0.1; }
+      else if (mt === 4) { k = rnd() < 0.3 ? 2 : 1; p = 0.14; sun = 0.4; }   /* 土 */
+      else if (mt === 2) { k = 1; p = 0.1; sun = 0.45; }
       else if (mt === 6 || mt === 7 || mt === 11) { k = 1; p = 0.012; }
       else if (mt === 10) continue;
-      else { k = 1; p = 0.004; }   /* 舗装 (アスファルトのひび) */
+      else { k = 1; p = 0.004; sun = 0.5; }   /* 舗装 (アスファルトのひび) */
       /* 材質の境目 (舗装と土・芝の境、塀ぎわ) は草が多い */
       if (mt >= 0 && mt !== 10) { let diff = false; for (const [ex, ez] of [[1.5, 0], [-1.5, 0], [0, 1.5], [0, -1.5]]) { const m2 = grassMat(x + ex, z + ez); if (m2 !== mt && m2 !== 10) { diff = true; break; } } if (diff && mt !== 3) { p += 0.3; if (mt === 4 || mt === 2) k = 2; } }
-      if (edge) { k = 1; p = Math.max(p, 0.22); }
+      if (edge) { k = 1; p = Math.max(p, 0.22); sun = Math.max(sun, 0.6); }
       if (inMoat(x, z) || nearCW(x, z, 3.5) || inCastle(x, z)) continue;
     }
     if (rnd() > p) continue;
@@ -6297,10 +6570,10 @@ function grassTile(tx, tz) {
     const gy = y ?? groundAt(x, z) - 0.03;
     if (castle && gy > 82) { if (gy > 96 && k !== 0) { if (rnd() > 0.25) continue; k = 0; } }   /* 本丸の上は砂利と土の広場: 背の高い草は置かない (castle セッション) */
     if (garden && k !== 0) { if (rnd() > 0.3) continue; k = 0; }   /* 二之丸庭園は手入れされた庭 */
-    add(x, gy, z, k);
-    if (k === 0 && rnd() < 0.6) { const x2 = x0 + i + rnd(), z2 = z0 + j + rnd(); add(x2, groundAt(x2, z2) - 0.03, z2, 0); }   /* 芝は 1m² に 2株 */
+    add(x, gy, z, k, sun);
+    if (k === 0 && rnd() < 0.6) { const x2 = x0 + i + rnd(), z2 = z0 + j + rnd(); add(x2, groundAt(x2, z2) - 0.03, z2, 0, sun); }   /* 芝は 1m² に 2株 */
   }
-  for (let e = GRASS.extra.get(tx + ',' + tz) || [], q = 0; q < e.length; q += 4) { const x = e[q], z = e[q + 2], med = e[q + 1] - groundAt(x, z) > 0.3; if (!med && onCarriageway(x, z, 0.05)) continue; if (TS.railD(x, z) < 2.6 || TS.subD(x, z) < 2.5 || spotBad(x, z) || (!med && inBld(x, z))) continue; add(x, e[q + 1], z, e[q + 3]); }
+  for (let e = GRASS.extra.get(tx + ',' + tz) || [], q = 0; q < e.length; q += 5) { const x = e[q], z = e[q + 2], med = e[q + 1] - groundAt(x, z) > 0.3; if (!med && onCarriageway(x, z, 0.05)) continue; if (TS.railD(x, z) < 2.6 || TS.subD(x, z) < 2.5 || spotBad(x, z) || (!med && inBld(x, z))) continue; add(x, e[q + 1], z, e[q + 3], e[q + 4]); }
   /* [x, y, z, rot] と [-, w*100+h/4, cell, br*100+dry] に分ける */
   const n = out.length / 7, P = new Float32Array(n * 4), S = new Float32Array(n * 4);
   for (let q = 0; q < n; q++) { P.set([out[q * 7], out[q * 7 + 1], out[q * 7 + 2], out[q * 7 + 3]], q * 4); S.set([0, out[q * 7 + 4], out[q * 7 + 5], out[q * 7 + 6]], q * 4); }
@@ -6580,9 +6853,9 @@ function buildSidewalks() {
     S.forEach((p, i) => { let tx = 0, tz = 0; for (let j = Math.max(0, i - 3); j <= Math.min(S.length - 1, i + 3); j++) { tx += S[j].tx; tz += S[j].tz; } const l = Math.hypot(tx, tz) || 1; p.ux = tx / l; p.uz = tz / l; p.yR = groundAt(p.x, p.z) + roadOff; });
     /* 上下線が別の道の間 (南堀端・一番町の線路の横): 古い歩道のれんが柄が見えないよう、2本の道の中心線の間をアスファルトで埋める (番号の小さい方の道だけが描く) */
     if (major) for (const side of [-1, 1]) { let run = [], lw = 0;
-      const flush = () => { if (run.length > 3) medians.push({ pts: run, w: lw + 1 }); run = []; };
+      const flush = () => { if (run.length > 3) medians.push({ pts: run, w: NARROW_HW.has(flat) ? Math.max(1, lw - 2 * hw0 + 1.2) : lw + 1 }); run = []; };   /* 幅を細くした道 (narrowRoads) は車道の縁と縁の間だけ (坂で車道より上に出て車線の白線を隠していた) */
       for (const p of S) { const nx = -p.uz * side, nz = p.ux * side; let best = 0;
-        if (inBox(p.x, p.z)) { const gx = Math.floor(p.x / 10), gz = Math.floor(p.z / 10); for (let a = -3; a <= 3; a++) for (let b = -3; b <= 3; b++) for (const [px, pz, r, id2, dx, dz] of cg.get((gx + a) + ',' + (gz + b)) || []) { if (id2 <= id || r < 6 || Math.abs(dx * p.ux + dz * p.uz) < 0.9 || Math.abs((px - p.x) * p.ux + (pz - p.z) * p.uz) > 3) continue; const l = (px - p.x) * nx + (pz - p.z) * nz; if (l > hw0 + 1 && l < 26 && (!best || l < best)) best = l; } }
+        if (inBox(p.x, p.z)) { const gx = Math.floor(p.x / 10), gz = Math.floor(p.z / 10); for (let a = -3; a <= 3; a++) for (let b = -3; b <= 3; b++) for (const [px, pz, r, id2, dx, dz] of cg.get((gx + a) + ',' + (gz + b)) || []) { if (id2 <= id || r < 3.55 || Math.abs(dx * p.ux + dz * p.uz) < 0.9 || Math.abs((px - p.x) * p.ux + (pz - p.z) * p.uz) > 3) continue; const l = (px - p.x) * nx + (pz - p.z) * nz; if (l > hw0 + 1 && l < 26 && (!best || l < best)) best = l; } }
         if (!best || (run.length && Math.abs(best - lw) > 1)) flush();
         if (best) { if (!run.length) lw = best; run.push([p.x + nx * lw / 2, p.z + nz * lw / 2]); } }
       flush(); }
@@ -6643,14 +6916,14 @@ function buildSidewalks() {
   });
   const mkMesh = (pos, uv, mat) => { if (!pos.length) return; const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); if (uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.computeVertexNormals(); const m = new THREE.Mesh(g, mat); m.receiveShadow = true; scene.add(m); };
   /* 上下線の間に路面電車の軌道がある所 (南堀端・西堀端) は、間を全部軌道と同じ暗い石畳にする (ストリートビュー 2025: 縁石なしで車道の白線の外から石の板) */
-  const railD = (x, z) => { let b = 1e9; for (const f of G.rails || []) for (let i = 0; i < f.length - 2; i += 2) { const ax = f[i], az = f[i + 1], vx = f[i + 2] - ax, vz = f[i + 3] - az; if (Math.abs(ax - x) > 60 && Math.abs(f[i + 2] - x) > 60) continue; const l2 = vx * vx + vz * vz || 1, t = Math.max(0, Math.min(1, ((x - ax) * vx + (z - az) * vz) / l2)); b = Math.min(b, Math.hypot(ax + vx * t - x, az + vz * t - z)); } return b; };
+  const railD = (x, z) => { let b = 1e9; for (const f of G.rails || []) for (let i = 0; i < f.length - 2; i += 2) { const ax = f[i], az = f[i + 1], vx = f[i + 2] - ax, vz = f[i + 3] - az; if (Math.min(ax, f[i + 2]) - 60 > x || Math.max(ax, f[i + 2]) + 60 < x) continue;   /* 長い区間 (両端とも 60m より遠い) を飛ばしていた */ const l2 = vx * vx + vz * vz || 1, t = Math.max(0, Math.min(1, ((x - ax) * vx + (z - az) * vz) / l2)); b = Math.min(b, Math.hypot(ax + vx * t - x, az + vz * t - z)); } return b; };
   /* 交差点 (信号の中心から 40m) の近くは車道の切れ目を埋めるアスファルトのまま (石の四角が車線の間に見えていた) */
   const nearJ = (x, z) => (G.signals || []).some(([sx, sz]) => (sx - x) ** 2 + (sz - z) ** 2 < 1600);
   const stoneRuns = []; for (const r of medians.slice()) { const p = r.pts[r.pts.length >> 1]; if (railD(p[0], p[1]) >= r.w / 2 - 0.5) continue;
     if (!(p[0] < -700 && p[1] > 880 && p[1] < 1200)) continue;   /* 石畳の軌道は南堀端・西堀端だけ (一番町・大街道はアスファルトにレール。ストリートビュー 2025-02) */
     let run = []; for (const q of r.pts) { if (nearJ(q[0], q[1])) { if (run.length > 24) stoneRuns.push({ pts: run, w: r.w }); run = []; } else run.push(q); } if (run.length > 24) stoneRuns.push({ pts: run, w: r.w }); }   /* 24m より短い切れ端は石にしない (車線の間に石の四角だけが見えた) */
   for (const r of stoneRuns) { const t = trackStoneTex(false).clone(); t.needsUpdate = true; t.repeat.set(r.w / 3.2, 1);
-    const m = new THREE.Mesh(ribbonGeometry([r], 0.172, 4), new THREE.MeshStandardMaterial({ map: t, roughness: 0.95, envMapIntensity: 0.25, polygonOffset: true, polygonOffsetFactor: -3.9, polygonOffsetUnits: -7.8 })); m.receiveShadow = true; scene.add(m); }
+    const m = new THREE.Mesh(ribbonGeometry([r], 0.172, 4), new THREE.MeshStandardMaterial({ map: t, color: r.pts[0][0] > -735 ? 0xe6b2a4 : 0xffffff, roughness: 0.95, envMapIntensity: 0.25, polygonOffset: true, polygonOffsetFactor: -3.9, polygonOffsetUnits: -7.8 })); m.receiveShadow = true; scene.add(m); }   /* 市役所前〜県庁前の軌道は赤茶色の舗装 (ストリートビュー 2025-04) */
   if (medians.length) { const m = new THREE.Mesh(ribbonGeometry(medians, 0.17, 16), new THREE.MeshStandardMaterial({ map: asphaltTex('none', 1), color: 0xe4e4e4, roughness: 0.95, envMapIntensity: 0.25, polygonOffset: true, polygonOffsetFactor: -3.8, polygonOffsetUnits: -7.6 })); asphaltShader(m.material, 1, 1); m.receiveShadow = true; scene.add(m); }   /* 車道と同じむら・色 (白い縁の線と明るい色が車線の間から明るい四角に見えていた) */
   mkMesh(curbP, null, curbM); for (let z = 0; z < 3; z++) mkMesh(paveP[z], paveU[z], paveM[z]);
   /* 点字ブロック: 30cm 角1枚 = 32px の小さな絵を繰り返す (デカールは使わない、2つのメッシュだけ)。線状は歩く向きに4本の突起、点状は 5×5 の点 */
@@ -6745,18 +7018,18 @@ function updateLights() {}
    夜の光のにじみ (bloom が作ったぼかし画像を少し足す)。見た目は1種類に固定 (real、本物のカメラ映像らしく見える程度で、やりすぎない)。
    メニューでの切り替えはしない。テスト用に window.__camfx.set('off') で外せる (保存しない)。高画質オフ (composer を使わない) のときは掛からない。 */
 const CAMFX_P = {
-  real: { sat: 0.88, con: 0.18, black: 0.025, lift: [0.98, 1.0, 1.03], gain: [1.025, 1.0, 0.97], vig: 0.24, grain: 0.02, ca: 0.0016, sharp: 0.25, blur: 0.02, glow: 0.25, glowC: [1.0, 0.9, 0.8], res: 1 },
+  real: { sat: 1.0, con: 0.28, black: 0.03, hi: 0.7, hiK: 0.6, toe: 0.6, lift: [0.98, 1.0, 1.03], gain: [1.025, 1.0, 0.97], vig: 0.24, grain: 0.02, ca: 0.0016, sharp: 0.25, blur: 0.02, glow: 0.25, glowC: [1.0, 0.9, 0.8], res: 1 },
 };
 const CAMFX = { mode: 'real', k: 1, pass: null, speed: null };
 function camfxMakePass() {
   const u = { tDiffuse: { value: null }, tGlow: { value: null }, uTexel: { value: new THREE.Vector2(1 / 1280, 1 / 720) }, uAspect: { value: 16 / 9 }, uTime: { value: 0 },
     uSat: { value: 1 }, uCon: { value: 0 }, uBlack: { value: 0 }, uLift: { value: new THREE.Vector3(1, 1, 1) }, uGain: { value: new THREE.Vector3(1, 1, 1) },
-    uVig: { value: 0 }, uGrain: { value: 0 }, uCA: { value: 0 }, uSharp: { value: 0 }, uBlur: { value: 0 }, uGlow: { value: 0 }, uGlowC: { value: new THREE.Vector3(1, 1, 1) } };
+    uVig: { value: 0 }, uGrain: { value: 0 }, uCA: { value: 0 }, uSharp: { value: 0 }, uBlur: { value: 0 }, uGlow: { value: 0 }, uGlowC: { value: new THREE.Vector3(1, 1, 1) }, uHi: { value: 1 }, uHiK: { value: 0 }, uToe: { value: 0 } };
   const p = new ShaderPass({ uniforms: u,
     vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
     fragmentShader: [
       'uniform sampler2D tDiffuse; uniform sampler2D tGlow; uniform vec2 uTexel; uniform float uAspect, uTime, uSat, uCon, uBlack, uVig, uGrain, uCA, uSharp, uBlur, uGlow;',
-      'uniform vec3 uLift, uGain, uGlowC; varying vec2 vUv;',
+      'uniform vec3 uLift, uGain, uGlowC; uniform float uHi, uHiK, uToe; varying vec2 vUv;',
       'float hash(vec2 p){ vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }',
       'void main(){',
       '  vec2 uv = vUv; vec2 d = uv - vec2(0.5, 0.52);',
@@ -6774,6 +7047,8 @@ function camfxMakePass() {
       '  float l = dot(c, vec3(0.299, 0.587, 0.114));',
       '  c = mix(vec3(l), c, uSat);',
       '  c = clamp((c - uBlack) / (1.0 - uBlack), 0.0, 1.0);',
+      '  if (uToe > 0.0) { vec3 o = 1.0 - c; c += uToe * c * o * o * o; }   /* 暗部の持ち上げ: 日陰が黒くつぶれないように (白にはほぼ効かない) */',
+      '  float hm = max(c.r, max(c.g, c.b)); if (uHiK > 0.0 && hm > uHi) { float t = (hm - uHi) / (1.0 - uHi); c *= (uHi + (1.0 - uHi) * t * (1.0 - 0.5 * uHiK * t)) / hm; }   /* 白の肩: 明るい所をなめらかに抑えて白い壁が飛ばないように */',
       '  c = mix(c, c * c * (3.0 - 2.0 * c), uCon);',
       '  l = dot(c, vec3(0.299, 0.587, 0.114));',
       '  c *= mix(uLift, uGain, smoothstep(0.05, 0.8, l));',
@@ -6800,6 +7075,7 @@ function camfxUpdate() {
   U.uTexel.value.set(1 / (w * pr), 1 / (h * pr)); U.uAspect.value = w / h; U.uTime.value = (performance.now() / 1000) % 100;
   U.uSat.value = L(1, P.sat); U.uCon.value = P.con * k; U.uBlack.value = P.black * k * (P.black > 0 ? 1 - 0.7 * NIGHT : 1);
   U.uLift.value.set(L(1, P.lift[0]), L(1, P.lift[1]), L(1, P.lift[2])); U.uGain.value.set(L(1, P.gain[0]), L(1, P.gain[1]), L(1, P.gain[2]));
+  U.uToe.value = (P.toe ?? 0) * Math.min(1, k) * (1 - NIGHT); U.uHi.value = P.hi ?? 1; U.uHiK.value = (P.hiK ?? 0) * Math.min(1, k) * (1 - NIGHT);
   U.uVig.value = P.vig * k; U.uGrain.value = P.grain * k * (1 + NIGHT * 1.3); U.uCA.value = P.ca * k; U.uSharp.value = P.sharp * k;
   const v = CAMFX.speed ?? Math.abs((typeof S !== 'undefined' && S.v) || 0); const sp = Math.min(1, Math.max(0, (v - 8) / 22));
   U.uBlur.value = (state === 'race' || state === 'free') || CAMFX.speed != null ? P.blur * k * sp : 0;
@@ -6818,7 +7094,7 @@ class AOPass extends Pass {
     super();
     const logF = 'float wAt(vec2 uv){ return exp2(texture2D(tDepth, uv).x * uLogF) - 1.0; }\n';
     this.aoRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false });
-    this.aoMat = new THREE.ShaderMaterial({ uniforms: { tDepth: { value: null }, uLogF: { value: 1 }, uP: { value: new THREE.Vector2(1, 1) }, uRes: { value: new THREE.Vector2(1, 1) }, uR: { value: 3 }, uK: { value: 3 }, uUp: { value: new THREE.Vector3(0, 1, 0) } },
+    this.aoMat = new THREE.ShaderMaterial({ uniforms: { tDepth: { value: null }, uLogF: { value: 1 }, uP: { value: new THREE.Vector2(1, 1) }, uRes: { value: new THREE.Vector2(1, 1) }, uR: { value: 3 }, uK: { value: 4 }, uUp: { value: new THREE.Vector3(0, 1, 0) } },
       vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
       fragmentShader: `uniform sampler2D tDepth; uniform float uLogF, uR, uK; uniform vec2 uP, uRes; uniform vec3 uUp; varying vec2 vUv;
 ${logF}
@@ -7151,7 +7427,7 @@ function buildDash() {
   const camOut = mkCam(512, 160, 26, 0.5, 320, true), camIn = mkCam(320, 96, 62, 0.08, 30, false), camUnder = mkCam(128, 128, 80, 0.2, 40, true);
   camOut.pos = V(0, 2.3, 0.25); camOut.look = V(0, 2.2, -10); camIn.pos = V(0.0, cl - 0.3, -0.72); camIn.look = V(0, 1.2, -8); camUnder.pos = V(hw - 0.35, cl + 0.05, 0.55); camUnder.look = V(0.2, 0, 1.6); camUnder.every = 6; camIn.every = 6; camOut.every = 2;
   const mplane = (w, h, cam, u0, u1, v0, v1) => { const g = new THREE.PlaneGeometry(w, h), uv = g.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, u0 + (u1 - u0) * uv.getX(i), v0 + (v1 - v0) * uv.getY(i)); return new THREE.Mesh(g, cam.mat); };
-  const bodyM = new THREE.MeshBasicMaterial({ color: 0xc8560c });
+  const bodyM = BUS_PAINT.bodyM = new THREE.MeshBasicMaterial({ color: new THREE.Color(BUS_PAINT.cur.base).multiplyScalar(0.85) });   /* 塗装のベース色 (setBusPaint が変える) */
   /* 外のミラー: 屋根の前の角から前へ突き出した腕の先 (右は運転席の近く、左は扉の前の遠く)。内側の端に車体のオレンジが映る */
   for (const [s, mx, my, mz, u0, u1, w, h] of [[-1, -hw - 0.55, 2.25, 0.6, 0.24, 0.0, 0.22, 0.38], [1, hw + 0.38, 2.28, 0.95, 1.0, 0.76, 0.24, 0.4]]) {
     const m = mplane(w, h, camOut, u0, u1, 0.08, 0.92); put(m, mx, my, mz); faceEye(m);
@@ -8213,12 +8489,14 @@ function addTaxiRank() {
   const cz = x => { let best = 952, bd = 1e9; for (const [rx, rz] of route) { const d = Math.abs(rx - x) + (Math.abs(rz - 955) > 15 ? 1e6 : 0); if (d < bd) { bd = d; best = rz; } } return best; };   // その位置の道路中心 (コース線)
   const xs = []; for (let k = 0; k < 13; k++) xs.push(-234 - k * 5.3); for (let k = 0; k < 8; k++) xs.push(-166 + k * 5.3); const nN = xs.length; for (let k = 0; k < 6; k++) xs.push(-120 + k * 5.3);   /* 向かい側は「大街道」のバス停 (-143, 925) より東 (バスが停留所へ寄る所をふさがない) */   // 西側 + 大街道の東側 (三越前) + その向かい側
   /* 北側 (向かい側) の列は、一番町通りの北の車道の中心線から歩道の縁石まで寄せる (縁石から 1.1m)。コース線から一定の距離だと、東へ行くほど車道の中に出て、東行きの車線の車がタクシーに重なって止まっていた */
-  const northZ = x => { let best = null, bd = 1e9; for (const [k, w, , flat] of G.roads) { if (!/^(trunk|primary)/.test(k) || w < 12) continue;
-      for (let i = 0; i + 3 < flat.length; i += 2) { const ax = flat[i], az = flat[i + 1], bx = flat[i + 2], bz = flat[i + 3]; if ((x - ax) * (x - bx) > 0 || ax === bx) continue; const zc = az + (bz - az) * (x - ax) / (bx - ax), d = Math.abs(zc - (cz(x) - 14.5)); if (d < 6 && d < bd) { bd = d; best = zc - (w / 2 - 1.1); } } }
-    return best ?? cz(x) - 19.2; };
+  /* 縁石から 1.1m: 車道の幅は roadHW (一番町は narrowRoads で片側2車線 = 半幅 3.6m。前の決め打ち 4.5〜6.1m だと歩道の上に並んだ) */
+  const edgeZ = (x, guess, s, fb) => { let best = null, bd = 1e9; for (const [k, w, , flat] of G.roads) { if (!/^(trunk|primary)/.test(k) || (w < 12 && !NARROW_HW.has(flat))) continue;
+      for (let i = 0; i + 3 < flat.length; i += 2) { const ax = flat[i], az = flat[i + 1], bx = flat[i + 2], bz = flat[i + 3]; if ((x - ax) * (x - bx) > 0 || ax === bx) continue; const zc = az + (bz - az) * (x - ax) / (bx - ax), d = Math.abs(zc - guess); if (d < 6 && d < bd) { bd = d; best = zc + s * (roadHW(k, flat) - 1.1); } } }
+    return best ?? fb; };
+  const northZ = x => edgeZ(x, cz(x) - 14.5, -1, cz(x) - 19.2), southZ = x => edgeZ(x, cz(x), 1, cz(x) + (x < -252 ? 4.5 : 6.1));
   /* 横から入ってくる道 (一番町通りより細い道) の口から 12m 以内には並べない (曲がって入ってくる車・大回りするバスがタクシーの後ろで止まったまま・すり抜けていた) */
   const crossNear = (x, z) => (roadNet ? roadNet.ways : []).some(w => w.rw < 12 && w.P.some((p, i) => { const q = w.P[i + 1]; if (!q) return false; const vx = q[0] - p[0], vz = q[1] - p[1], L2 = vx * vx + vz * vz || 1, t = Math.max(0, Math.min(1, ((x - p[0]) * vx + (z - p[1]) * vz) / L2)); return Math.hypot(p[0] + vx * t - x, p[1] + vz * t - z) < 12; }));
-  for (let k = 0; k < xs.length; k++) { const north = k >= nN, x = xs[k], z = north ? northZ(x) : cz(x) + (x < -252 ? 4.5 : 6.1); if (crossNear(x, z) || (G.bus || []).some(p => Math.hypot(p[0] - x, p[1] - z) < 14)) continue; const realT = carModels.filter(m => m.real && m.name === 'taxi'); let t; if (realT.length) { const m = realT[k % realT.length]; t = m.obj.clone(true); dressRealCar(m, t, 0x111214, []); } else t = makeTaxi(); const col = k % 3 === 2 ? 0xf0f0ec : 0x111214;   /* 実車モデル (JPN TAXI・クラウンコンフォート) があればそれを並べる */
+  for (let k = 0; k < xs.length; k++) { const north = k >= nN, x = xs[k], z = north ? northZ(x) : southZ(x); if (crossNear(x, z) || (G.bus || []).some(p => Math.hypot(p[0] - x, p[1] - z) < 14)) continue; const realT = carModels.filter(m => m.real && m.name === 'taxi'); let t; if (realT.length) { const m = realT[k % realT.length]; t = m.obj.clone(true); dressRealCar(m, t, 0x111214, []); } else t = makeTaxi(); const col = k % 3 === 2 ? 0xf0f0ec : 0x111214;   /* 実車モデル (JPN TAXI・クラウンコンフォート) があればそれを並べる */
     t.traverse(o => { if (o.isMesh && o.material.name === 'body') { o.material = o.material.clone(); o.material.color.set(col); } }); t.position.set(x, groundAt(x, z), z); t.rotation.y = north ? Math.PI / 2 : -Math.PI / 2; scene.add(t);
     traffic.push({ obj: t, lampMats: [], x, z, h: north ? Math.PI / 2 : -Math.PI / 2, rx: 0, rz: 0, rh: 0, v: 0, parked: true, kind: 'taxi', wheels: [] }); }   // 客待ち: ぶつければ飛ぶ
 }
@@ -8836,7 +9114,7 @@ async function submitScore(t, rec) {
 
 const GAISEN_VOICE = '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VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVMQU1FMy4xMDBVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX/+3DEbYPAAAGkAAAAIAAANIAAAARVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV';
 const refPos = () => state === 'omake' && GAISEN.c ? GAISEN.c : S;
-// ---------------- おまけ: 愛媛大学最強号 (黒い街宣バス。屋根のお立ち台で叫び続ける) ----------------
+// ---------------- おまけ: 最強号 (黒い街宣バス。屋根のお立ち台で叫び続ける) ----------------
 const GAISEN = { c: null, view: 0, yaw: 0, pitch: 0.25, dist: 16, drag: false, buf: null, nextT: 0, playing: -1 };
 const GAISEN_VIEWS = ['追尾', '真横', '前から', 'お立ち台アップ', '上空', 'ぐるっと回る'];
 function gaisenText(lines, w, h, size, opts = {}) {
@@ -8881,9 +9159,9 @@ function updateGaisenDrive(c, dt) {
   if (c.obj.userData.wheels) for (const w of c.obj.userData.wheels) { w.wh.rotation.x += (c.v || 0) * dt / 0.53; if (w.front) w.piv.rotation.y = THREE.MathUtils.clamp((c.dh || 0) * 6, -0.5, 0.5); }
 }
 function gaisenSpawn(c, x, z, r0, r1) { for (let k = 0; k < 40; k++) { spawnCar(c, x, z, r0, r1); if (roadNet.ways[c.w].sp >= 11) return; } }
-/* ---------------- おまけ: 愛媛大学最強号 (選挙カー版と改造トラック版) ----------------
+/* ---------------- おまけ: 最強号 (選挙カー版と改造トラック版) ----------------
    おまけの中で C キー・「車を替える」ボタンで切り替える。
-   - 選挙カー: 一般車の実車モデルのハイエース (cars2.dat.wasm) を白にして、屋根に看板 (「愛媛大学最強」)・ラッパ型スピーカー8本・お立ち台・手すり・はしご・ちょうちん・ランプを載せる
+   - 選挙カー: 一般車の実車モデルのハイエース (cars2.dat.wasm) を白にして、屋根に看板 (「最強号」)・ラッパ型スピーカー8本・お立ち台・手すり・はしご・ちょうちん・ランプを載せる
    - 改造トラック: 日野プロフィアの平ボディ (gaisen.dat.wasm、tools/build_gaisen.mjs でエンブレムと元のナンバーを消したもの) に、絵を描いた黒い箱・ステンレスの飾り
      (バンパー・バイザー・箱の枠・ウロコの帯)・マーカーランプの列・運転台の上のアンドン、箱の上のお立ち台・看板・スピーカー・ちょうちんを載せる。
      元のタイヤは車体と一体なので、上から回るタイヤ (メッキのホイール) をかぶせる
@@ -8949,7 +9227,7 @@ function gzSenkyoSign(w, h, text, small = 'ご声援ありがとうございま�
 }
 /* たすき (白地に縦書きの黒い字 / 橙地) */
 function gzTasukiTex(text, bg = '#fafaf6', fg = '#111') { return gzCanvas(96, 768, (g, w, h) => { g.fillStyle = bg; g.fillRect(0, 0, w, h); g.fillStyle = fg; g.textAlign = 'center'; g.textBaseline = 'middle'; const ch = [...text]; g.font = `900 ${Math.min(w * 0.8, h / ch.length * 0.8)}px ${GZ_FONT}`; ch.forEach((c, i) => g.fillText(c, w / 2, h * (i + 0.5) / ch.length)); }); }
-/* 改造トラックの箱の横の絵: 夜空・満月・お城・波・「愛媛大学最強」 */
+/* 改造トラックの箱の横の絵: 夜空・満月・お城・波・「最強号」 */
 function gzBoxArt(w, h) {
   return gzCanvas(w, h, (g) => { const s = h / 560;
     const sky = g.createLinearGradient(0, 0, 0, h); sky.addColorStop(0, '#07081f'); sky.addColorStop(0.55, '#2b1552'); sky.addColorStop(1, '#5c1838'); g.fillStyle = sky; g.fillRect(0, 0, w, h);
@@ -8965,7 +9243,7 @@ function gzBoxArt(w, h) {
     for (let row = 0; row < 3; row++) { const y = h * (0.83 + row * 0.065); g.fillStyle = ['#1f4796', '#173a82', '#0f2a66'][row]; g.beginPath(); g.moveTo(0, h); g.lineTo(0, y);
       for (let x = 0; x <= w; x += 70 * s) g.quadraticCurveTo(x + 35 * s, y - 30 * s, x + 70 * s, y); g.lineTo(w, h); g.fill();
       g.strokeStyle = '#e9f1ff'; g.lineWidth = 4 * s; g.beginPath(); for (let x = 0; x <= w; x += 70 * s) { g.moveTo(x, y); g.quadraticCurveTo(x + 35 * s, y - 30 * s, x + 70 * s, y); } g.stroke(); }
-    const tx = '愛媛大学最強'; g.textAlign = 'center'; g.textBaseline = 'middle'; const fs = gzFont(g, tx, w * 0.56, h * 0.42); const X = w * 0.66, Y = h * 0.47;
+    const tx = '最強号'; g.textAlign = 'center'; g.textBaseline = 'middle'; const fs = gzFont(g, tx, w * 0.56, h * 0.42); const X = w * 0.66, Y = h * 0.47;
     g.lineJoin = 'round'; g.lineWidth = fs * 0.2; g.strokeStyle = '#000'; g.strokeText(tx, X, Y); g.lineWidth = fs * 0.1; g.strokeStyle = '#c4121b'; g.strokeText(tx, X, Y);
     const gr = g.createLinearGradient(0, Y - fs / 2, 0, Y + fs / 2); gr.addColorStop(0, '#fff6b8'); gr.addColorStop(0.45, '#f2c043'); gr.addColorStop(0.55, '#c98a12'); gr.addColorStop(1, '#ffe27a'); g.fillStyle = gr; g.fillText(tx, X, Y);
     g.fillStyle = '#c4121b'; const hs = h * 0.16; g.fillRect(w * 0.93 - hs / 2, h * 0.76 - hs / 2, hs, hs); g.fillStyle = '#fff'; g.font = `900 ${hs * 0.4}px ${GZ_FONT}`; g.fillText('最', w * 0.93, h * 0.76 - hs * 0.22); g.fillText('強', w * 0.93, h * 0.76 + hs * 0.22);
@@ -8974,7 +9252,7 @@ function gzBoxArt(w, h) {
 /* 箱の後ろの扉の絵 */
 function gzRearArt(w, h) {
   return gzCanvas(w, h, (g) => { g.fillStyle = '#0b0b0d'; g.fillRect(0, 0, w, h); g.strokeStyle = '#d9ad48'; g.lineWidth = 10; g.strokeRect(14, 14, w - 28, h - 28); g.beginPath(); g.moveTo(w / 2, 14); g.lineTo(w / 2, h - 14); g.stroke();
-    g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#f2c043'; gzFont(g, '愛媛大学', w * 0.8, h * 0.13); g.fillText('愛媛大学', w / 2, h * 0.17);
+    g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#f2c043'; gzFont(g, '最強号', w * 0.8, h * 0.13); g.fillText('最強号', w / 2, h * 0.17);
     const fs = gzFont(g, '最強', w * 0.86, h * 0.5); g.lineJoin = 'round'; g.lineWidth = fs * 0.12; g.strokeStyle = '#f2c043'; g.strokeText('最強', w / 2, h * 0.58); g.fillStyle = '#c4121b'; g.fillText('最強', w / 2, h * 0.58); });
 }
 /* ステンレスのウロコ模様の帯 */
@@ -9005,9 +9283,9 @@ function gzSenkyo(hm) {
   const K = new THREE.Group(); b.add(K); const y0 = top + 0.1, hw = 0.8, z0 = zr + 0.12, z1 = zFront - 0.02;
   /* 屋根のキャリア (黒い角パイプと脚) */
   for (const x of [-hw + 0.06, hw - 0.06]) { gzBox(K, 0.05, 0.05, z1 - z0, x, y0 - 0.03, (z0 + z1) / 2, M.frame); for (const z of [z0 + 0.1, (z0 + z1) / 2, z1 - 0.1]) gzBox(K, 0.06, 0.12, 0.08, x, top + 0.03, z, M.frame); }
-  /* 看板 (前寄り): 横は「愛媛大学最強」、前は「最強」 */
+  /* 看板 (前寄り): 横は「最強号」、前は「最強」 */
   const Ls = Math.min(1.9, (z1 - z0) * 0.55), sz1 = z1, sz0 = z1 - Ls, sH = 0.78, sy = y0 + sH / 2, sw = hw * 2;
-  const sideT = gzSenkyoSign(2048, 820, '愛媛大学最強'), frontT = gzSenkyoSign(1024, 820, '最強', '愛媛大学');
+  const sideT = gzSenkyoSign(2048, 820, '最強号'), frontT = gzSenkyoSign(1024, 820, '最強', '最強号');
   gzBox(K, sw - 0.04, sH - 0.04, Ls - 0.04, 0, sy, (sz0 + sz1) / 2, M.white);
   for (const s of [-1, 1]) gzPlane(K, Ls, sH, new THREE.MeshStandardMaterial({ map: sideT, roughness: 0.55 }), s * hw, sy, (sz0 + sz1) / 2, s * Math.PI / 2);
   gzPlane(K, sw, sH, new THREE.MeshStandardMaterial({ map: frontT, roughness: 0.55 }), 0, sy, sz1 + 0.001, 0);
@@ -9027,7 +9305,7 @@ function gzSenkyo(hm) {
   for (const s of [-1, 1]) { const ch = gzChochin('最強'); ch.position.set(s * (hw + 0.02), dy + 0.62, dz0 + 0.05); K.add(ch); }
   gzLamps(K, [...gzRow(-hw, dy + 0.97, dz0, hw, dy + 0.97, dz0, 0.15), ...gzRow(hw, dy + 0.97, dz0, hw, dy + 0.97, dz1, 0.15), ...gzRow(-hw, dy + 0.97, dz0, -hw, dy + 0.97, dz1, 0.15)], 0xff5a3c, 0.045, true, 0.3, 3);
   /* 車体の横のマグネットの看板 */
-  const magT = gzSenkyoSign(1536, 300, '愛媛大学最強', '');
+  const magT = gzSenkyoSign(1536, 300, '最強号', '');
   for (const s of [-1, 1]) gzPlane(b, 2.3, 0.45, new THREE.MeshStandardMaterial({ map: magT, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2 }), s * (Math.abs(bodyX) + 0.012), 0.82, -0.35, s * Math.PI / 2);
   const slot = new THREE.Group(); slot.position.set(0.1, dy, (dz0 + dz1) / 2 + 0.05); slot.rotation.y = 1.0; K.add(slot);
   /* 回るタイヤ: 実車モデルの「wheel」の部品を、その中心で回す */
@@ -9084,7 +9362,7 @@ function gzDeko(src, cfg) {
       g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = `900 ${h * 0.72}px ${GZ_FONT}`; g.lineWidth = 10; g.strokeStyle = '#111'; g.strokeText('最強', w / 2, h * 0.53); g.fillStyle = '#c4121b'; g.fillText('最強', w / 2, h * 0.53); });
     const pl = gzPlane(b, 1.05, 0.4, new THREE.MeshStandardMaterial({ map: t, metalness: 0.6, roughness: 0.25 }), 0, ye, ze + 0.05, 0, -tilt); pl.castShadow = true; }
   { const yv = roof - 0.55, zv = frontZ(yv - 0.1); gzBox(b, 2.5, 0.06, 0.5, 0, yv, zv + 0.12, M.chrome); gzLamps(b, gzRow(-1.15, yv - 0.06, zv + 0.36, 1.15, yv - 0.06, zv + 0.36, 0.2), 0xffb43a, 0.08); }
-  { const t = gzCanvas(1024, 220, (g, w, h) => { g.fillStyle = '#fffaf0'; g.fillRect(0, 0, w, h); g.strokeStyle = '#c4121b'; g.lineWidth = 16; g.strokeRect(8, 8, w - 16, h - 16); g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#c4121b'; gzFont(g, '愛媛大学最強号', w * 0.88, h * 0.62); g.fillText('愛媛大学最強号', w / 2, h * 0.54); });
+  { const t = gzCanvas(1024, 220, (g, w, h) => { g.fillStyle = '#fffaf0'; g.fillRect(0, 0, w, h); g.strokeStyle = '#c4121b'; g.lineWidth = 16; g.strokeRect(8, 8, w - 16, h - 16); g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#c4121b'; gzFont(g, '最強号', w * 0.88, h * 0.62); g.fillText('最強号', w / 2, h * 0.54); });
     const an = gzGlow(0xffffff, 0.35, 2.4, { map: t, emissiveMap: t, roughness: 0.4 }), zA = zc + 0.95;
     gzBox(b, 2.1, 0.44, 0.22, 0, roof + 0.26, zA, M.chrome); gzPlane(b, 2.0, 0.36, an, 0, roof + 0.26, zA + 0.115, 0); gzPlane(b, 2.0, 0.36, an, 0, roof + 0.26, zA - 0.115, Math.PI);
     gzLamps(b, gzRow(-1.0, roof + 0.5, zA + 0.12, 1.0, roof + 0.5, zA + 0.12, 0.2), 0xff3a2a, 0.07); }
@@ -9092,7 +9370,7 @@ function gzDeko(src, cfg) {
   const dy = yTop + 0.02, sw = hw * 2 - 0.12, Ls = 2.2, sz1 = bz1 - 0.1, sz0 = sz1 - Ls, sH = 1.0, sy = dy + sH / 2;
   gzBox(b, hw * 2 - 0.02, 0.04, bL - 0.04, 0, yTop + 0.0, bzc, M.deck);
   gzBox(b, sw, sH, Ls, 0, sy, (sz0 + sz1) / 2, M.black);
-  const tSide = gaisenText('愛媛大学最強', 2048, 900, 640), tFront = gaisenText('最強', 1024, 400, 330);
+  const tSide = gaisenText('最強号', 2048, 900, 640), tFront = gaisenText('最強', 1024, 400, 330);
   const tm = t => new THREE.MeshBasicMaterial({ map: t, transparent: true, alphaTest: 0.05 });
   for (const s of [-1, 1]) gzPlane(b, Ls - 0.1, sH * 0.85, tm(tSide), s * (sw / 2 + 0.005), sy, (sz0 + sz1) / 2, s * Math.PI / 2);
   gzPlane(b, sw - 0.1, sH * 0.8, tm(tFront), 0, sy, sz1 + 0.005, 0); gzPlane(b, sw - 0.1, sH * 0.8, tm(tFront), 0, sy, sz0 - 0.005, Math.PI);
@@ -9105,7 +9383,7 @@ function gzDeko(src, cfg) {
   const rz0 = bz0 + 0.1, rz1 = sz0 - 0.05, rx = hw - 0.06;
   gzRail(b, -rx, rx, rz0, rz1, dy, 1.05, M.chrome, ['front']);
   gzLamps(b, [...gzRow(-rx, dy + 1.08, rz0, rx, dy + 1.08, rz0, 0.25), ...[-1, 1].flatMap(s => gzRow(s * rx, dy + 1.08, rz0, s * rx, dy + 1.08, rz1, 0.25))], 0xff4030, 0.055, true, 0.3, 3.5);
-  for (const s of [-1, 1]) { const n = Math.max(2, Math.round((rz1 - rz0) / 1.25)); for (let i = 0; i <= n; i++) { const ch = gzChochin(i % 2 ? '愛大' : '最強'); ch.position.set(s * (rx + 0.03), dy + 0.78, rz0 + (rz1 - rz0) * i / n); b.add(ch); } }
+  for (const s of [-1, 1]) { const n = Math.max(2, Math.round((rz1 - rz0) / 1.25)); for (let i = 0; i <= n; i++) { const ch = gzChochin(i % 2 ? '最強号' : '最強'); ch.position.set(s * (rx + 0.03), dy + 0.78, rz0 + (rz1 - rz0) * i / n); b.add(ch); } }
   gzLadder(b, hw - 0.45, bz0 - 0.06, 0.6, dy, M.steel);
   /* 回るタイヤ (前の2軸は曲がる) */
   const W2 = [], wr = Math.min(0.53, (cfg.wheels && cfg.wheels.r) || 0.52), wx = Math.min(hw, ((cfg.wheels && cfg.wheels.x) || 1.45) * 0.83);
@@ -9146,7 +9424,7 @@ function gzRig(g, look) {
   const M = gzMats();
   if (look === 'gakuran') { const band = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.016, 6, 20), M.white); band.rotation.x = Math.PI / 2; band.position.set(0, ep.y + 0.045, hp.z + (ep.z - hp.z) * 0.15); band.scale.set(1, 1.15, 1); holder.add(band); holder.updateMatrixWorld(true); bone.Head.attach(band);
     const knot = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.12, 0.02), M.white); knot.position.set(0, ep.y + 0.0, hp.z - 0.1); knot.rotation.x = 0.4; holder.add(knot); holder.updateMatrixWorld(true); bone.Head.attach(knot); }
-  { const tor = bone.Torso || bone.Abdomen || bone.Neck, tp = holder.worldToLocal(gzWP(tor)); const tex = look === 'suit' ? gzTasukiTex('愛媛大学最強') : gzTasukiTex('愛媛大学最強', '#ff7a00', '#1a0a00');
+  { const tor = bone.Torso || bone.Abdomen || bone.Neck, tp = holder.worldToLocal(gzWP(tor)); const tex = look === 'suit' ? gzTasukiTex('最強号') : gzTasukiTex('最強号', '#ff7a00', '#1a0a00');
     for (const zs of [1, -1]) { const t = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.78, 0.008), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.7 })); t.position.set(0, tp.y + 0.02, tp.z + zs * 0.125); t.rotation.z = sR * 0.72 * zs; holder.add(t); holder.updateMatrixWorld(true); tor.attach(t); } }
   if (look === 'suit') for (const pb of [bone.PalmL, bone.PalmR]) { const gl = new THREE.Mesh(new THREE.SphereGeometry(0.048, 10, 8), M.white); gl.scale.set(1, 1.3, 0.75); gl.position.copy(gzWP(pb)); pb.attach(gl); }
   { const mic = new THREE.Group(); const h = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.014, 0.17, 10), M.black); mic.add(h); const ball = new THREE.Mesh(new THREE.SphereGeometry(0.032, 12, 10), new THREE.MeshStandardMaterial({ color: 0x777b80, metalness: 0.8, roughness: 0.35 })); ball.position.y = 0.1; mic.add(ball);
@@ -9181,7 +9459,7 @@ function gzSwap(kind) {
   const C = GAISEN.cars; if (!C) return; const want = kind || (GAISEN.kind === 'senkyo' ? 'deko' : 'senkyo'), a = GAISEN.c, b = C[want]; if (!b || b === a) return;
   b.s = a.s; b.v = a.v; b.h = a.h; b.wait = 0; b.push = 0; const i = traffic.indexOf(a); if (i >= 0) traffic[i] = b; else traffic.push(b);
   a.obj.visible = false; b.obj.visible = true; GAISEN.c = b; GAISEN.kind = want; updateGaisenDrive(b, 0);
-  if (state === 'omake') { ui.msg.textContent = want === 'deko' ? '愛媛大学最強号 (改造トラック)' : '愛媛大学最強号 (選挙カー)'; ui.msg.hidden = false; clearTimeout(GZ.msgT); GZ.msgT = setTimeout(() => { if (state === 'omake') ui.msg.hidden = true; }, 1600); }
+  if (state === 'omake') { ui.msg.textContent = want === 'deko' ? '最強号 (改造トラック)' : '最強号 (選挙カー)'; ui.msg.hidden = false; clearTimeout(GZ.msgT); GZ.msgT = setTimeout(() => { if (state === 'omake') ui.msg.hidden = true; }, 1600); }
 }
 async function gzLoadExtras() {
   try { const raw = await fetchBytes('gaisen.dat.wasm', 4600000); const hl = new DataView(raw.buffer, raw.byteOffset).getUint32(0, true), head = JSON.parse(new TextDecoder().decode(raw.subarray(4, 4 + hl))); let o = 4 + hl;
@@ -9208,13 +9486,13 @@ function buildGaisenBus(proto) {
   const b = prepareCar(proto.clone(true), false); const sk = b.getObjectByName('saikyo'); if (sk) sk.parent.remove(sk);
   // 黒塗り (元の塗装のテクスチャを残したまま黒く沈める: 窓はスモーク)
   b.traverse(o => { if (!o.isMesh || o === b.userData.sign) return; if (o.material && o.material.isMeshPhysicalMaterial) { o.material = o.material.clone(); o.material.color.setHex(0x1a1a1c); o.material.clearcoat = 1; o.material.roughness = 0.25; o.material.metalness = 0.35; } o.castShadow = true; });
-  // 行先表示も「愛媛大学最強」
-  if (b.userData.sign) b.userData.sign.material = new THREE.MeshBasicMaterial({ map: gaisenText('愛媛大学最強', 768, 128, 96, { bg: '#050505' }) });
+  // 行先表示も「最強号」
+  if (b.userData.sign) b.userData.sign.material = new THREE.MeshBasicMaterial({ map: gaisenText('最強号', 768, 128, 96, { bg: '#050505' }) });
   b.updateMatrixWorld(true);
   const bb = new THREE.Box3().setFromObject(b), top = bb.max.y, hx = Math.max(-bb.min.x, bb.max.x), zf = bb.max.z, zr = bb.min.z;
   const textM = (tex) => new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.05, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 });
-  // 車体の横 (窓の下の腰板) に大きく「愛媛大学最強」
-  const side = gaisenText('愛媛大学最強', 2048, 300, 250);
+  // 車体の横 (窓の下の腰板) に大きく「最強号」
+  const side = gaisenText('最強号', 2048, 300, 250);
   for (const sd of [-1, 1]) { const m = new THREE.Mesh(new THREE.PlaneGeometry(8.6, 1.2), textM(side)); m.position.set(sd * (hx + 0.015), top * 0.6, -0.2); m.rotation.y = sd * Math.PI / 2; b.add(m); }
   // 前と後ろに「最強」
   const fr = gaisenText('最強', 1024, 400, 330);
@@ -9277,17 +9555,6 @@ function gaisenAudioInit() {
   // やまびこ: 0.32秒ごとに返ってくるエコー (少しずつこもる)
   const d1 = C.createDelay(2), fb = C.createGain(), lp = C.createBiquadFilter(), ew = C.createGain(); d1.delayTime.value = 0.32; fb.gain.value = 0.48; lp.type = 'lowpass'; lp.frequency.value = 3200; ew.gain.value = 0.55;
   ws.connect(d1); d1.connect(lp); lp.connect(fb); fb.connect(d1); lp.connect(ew); ew.connect(GAISEN.lpf);
-  let andon = null;
-  if (c.kind === 'taxi') {   /* 屋根の行灯: 屋根のいちばん上 (12cm 以内) の頂点の範囲に、夜だけ光る箱をかぶせる (文字は描かない) */
-    const v = new THREE.Vector3(), ab = new THREE.Box3(); o.position.set(0, 0, 0); o.rotation.set(0, 0, 0); o.updateMatrixWorld(true);
-    o.traverse(q => { if (!q.isMesh || q.userData.rig || !q.geometry) return; const P = q.geometry.attributes.position; for (let i = 0; i < P.count; i++) { v.fromBufferAttribute(P, i).applyMatrix4(q.matrixWorld); if (v.y > bb.max.y - 0.12 && Math.abs(v.x - cx) < 0.4) ab.expandByPoint(v); } });
-    o.position.copy(p); o.rotation.set(rx, ry, 0);
-    if (!ab.isEmpty()) { const s3 = ab.getSize(new THREE.Vector3()), ctr = ab.getCenter(new THREE.Vector3()); if (s3.x < 0.8 && s3.z < 0.6) { andon = mat(0xffe6b0); andon.color.setRGB(1.5, 1.3, 0.9); andon.visible = false;
-      const q = new THREE.Mesh(new THREE.BoxGeometry(s3.x + 0.02, Math.max(0.06, s3.y) + 0.01, s3.z + 0.02), andon); q.position.copy(ctr); q.userData.rig = 1; o.add(q); } }
-    /* 行灯の部品が無いモデル (JPN TAXI は元の会社の塗装と一緒に外した): 屋根の前寄りに白い行灯 (幅 30cm・高さ 14cm) を置く。昼は白い箱、夜は光る */
-    if (!andon) { andon = mat(0xffe6b0); andon.color.setRGB(1.5, 1.3, 0.9); andon.visible = false; const g = new RoundedBoxGeometry(0.3, 0.14, 0.12, 2, 0.03);
-      const body = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xf2f0ea, roughness: 0.4 })), glow = new THREE.Mesh(g, andon), y = bb.max.y + 0.07, z = (bb.min.z + bb.max.z) / 2 + (bb.max.z - bb.min.z) * 0.08;
-      for (const q of [body, glow]) { q.position.set(cx, y, z); q.userData.rig = 1; o.add(q); } glow.scale.setScalar(1.02); } }
   // ビルに反響する残響
   const conv = C.createConvolver(); { const len = Math.floor(C.sampleRate * 2.4), ir = C.createBuffer(2, len, C.sampleRate); for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.2) * (i < C.sampleRate * 0.02 ? i / (C.sampleRate * 0.02) : 1); } conv.buffer = ir; }
   const rw = C.createGain(); rw.gain.value = 0.38; ws.connect(conv); conv.connect(rw); rw.connect(GAISEN.lpf);
@@ -9325,7 +9592,7 @@ function startOmake() {
   $('menu').hidden = true; $('result').hidden = true; $('pause').hidden = true; ui.msg.hidden = true; $('annc').hidden = true;
   if (car) car.visible = false; ghostCar.visible = false; camera.children.forEach(o => o.visible = false);
   audio.start(); gaisenAudioInit(); state = 'omake'; GAISEN.view = 0; GAISEN.yaw = 0; GAISEN.pitch = 0.25; GAISEN.dist = 16; GAISEN.camInit = false; $('omakeView').textContent = GAISEN_VIEWS[0];
-  ui.msg.textContent = '愛媛大学最強号'; ui.msg.hidden = false; setTimeout(() => { if (state === 'omake') ui.msg.hidden = true; }, 1800);
+  ui.msg.textContent = '最強号'; ui.msg.hidden = false; setTimeout(() => { if (state === 'omake') ui.msg.hidden = true; }, 1800);
 }
 function endOmake() { document.body.classList.remove('omake'); if (car) car.visible = true; }
 function omakeCycle() { GAISEN.view = (GAISEN.view + 1) % GAISEN_VIEWS.length; $('omakeView').textContent = GAISEN_VIEWS[GAISEN.view]; GAISEN.yaw = 0; GAISEN.pitch = GAISEN.view === 4 ? 0.9 : 0.25; GAISEN.dist = [16, 13, 15, 6, 34, 20][GAISEN.view]; }
@@ -9402,8 +9669,10 @@ function frame(now) {
   // shadows follow
   /* 影の範囲 (一辺 400m) はカメラの前方へずらして、見えている所の遠くまで影が落ちるようにする */
   /* 影を描く物の数は範囲の広さで決まる (中心部では影の描画が全体の半分以上)。画質で範囲を変える: 高 一辺400m、中 280m、低 200m (メニューの空撮は 1800/1200/800m) */
-  const span = (state === 'menu' ? { high: 900, mid: 600, low: 400 } : { high: 200, mid: 140, low: 100 })[QUAL]; camera.getWorldDirection(_shFwd); const _fl = Math.hypot(_shFwd.x, _shFwd.z) || 1;
-  const fx0 = state === 'menu' ? -300 : refPos().x + _shFwd.x / _fl * span * 0.55, fz0 = state === 'menu' ? 700 : refPos().z + _shFwd.z / _fl * span * 0.55;
+  if (GARAGE.on) garageFrame(dt);   /* ガレージ (バスの塗装とデカールの編集): カメラをバスのまわりに */
+  const _mn = state === 'menu' && !GARAGE.on;   /* ガレージの間は影をバスのまわりに */
+  const span = (_mn ? { high: 900, mid: 600, low: 400 } : { high: 200, mid: 140, low: 100 })[QUAL]; camera.getWorldDirection(_shFwd); const _fl = Math.hypot(_shFwd.x, _shFwd.z) || 1;
+  const fx0 = _mn ? -300 : refPos().x + _shFwd.x / _fl * span * 0.55, fz0 = _mn ? 700 : refPos().z + _shFwd.z / _fl * span * 0.55;
   const sc = sun.shadow.camera; if (sc.right !== span) { sc.left = -span; sc.right = span; sc.top = span; sc.bottom = -span; sc.near = 1; sc.far = 3000; sc.updateProjectionMatrix(); }
   const tex = span * 2 / sun.shadow.mapSize.x, sx = Math.round(fx0 / tex) * tex, sz = Math.round(fz0 / tex) * tex, sy = groundAt(sx, sz);
   sun.target.position.set(sx, sy, sz); sun.position.set(sx + sunDir.x * 1200, sy + sunDir.y * 1200, sz + sunDir.z * 1200);
