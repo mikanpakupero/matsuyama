@@ -3727,7 +3727,8 @@ function busDoorLeaf(tris, za, zb, hinge, mat, glassMat) {
    窓・ライト・ゴム・タイヤ・黒い窓まわりはマスクの外なので塗らない。マスクの値で混ぜるので (足し算)、ぼけた縁もきれいにつながる。
    色は BUS_PAINT.u の共有の uniform なので、選び直すとすぐ全部の部品に反映。選んだ色は localStorage (mcr_busPaint) */
 const BUS_PAINT_PRESETS = [
-  { id: 'seto', name: '瀬戸内ライン', base: '#f3f1ea', band: '#1d5fa6', band2: '#2fb3c6', roof: '#2b3f58' },   /* 既定: 白い車体に海の青の帯と水色の線 */
+  { id: 'shiro', name: '真っ白', base: '#f6f6f3', band: '#f6f6f3', band2: '#f6f6f3', roof: '#ececea' },   /* 既定: 帯なしの真っ白。好きな色やデカールを足す下地 */
+  { id: 'seto', name: '瀬戸内ライン', base: '#f3f1ea', band: '#1d5fa6', band2: '#2fb3c6', roof: '#2b3f58' },   /* 白い車体に海の青の帯と水色の線 */
   { id: 'sora', name: '白と空色', base: '#fbfbf8', band: '#5cc0ec', band2: '#a8def4', roof: '#c9d3da' },
   { id: 'midori', name: '緑の帯', base: '#f2f1e8', band: '#2e8a4c', band2: '#a3cc3a', roof: '#33463a' },
   { id: 'himawari', name: 'ひまわり', base: '#f4cf45', band: '#245fa8', band2: '#fbfaf2', roof: '#3a3e44' },
